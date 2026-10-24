@@ -36,4 +36,4 @@ pio device monitor -b 115200
 
 配网成功页现可显示灵矽激活码，操作与实现边界见 [wifi-activation.md](wifi-activation.md)。配网组件使用项目内维护的版本，依赖缓存重新下载不会覆盖本地改动。
 
-当前 PlatformIO 配置另已启用串口文字测试模式，暂时停用麦克风上传和小车动作输出；操作方法、关闭方式及平台兼容性边界见 [serial-text-chat.md](serial-text-chat.md)。
+当前 PlatformIO 配置已关闭串口文字测试模式，启用麦克风上传及 STM32 UART1（TX=17、RX=21），自动小车控制且不播放 AI 回复时，使用原协议 realtime 持续监听，JSON 下发后不等待 tts.stop 即回到聆听。文字测试操作见 [serial-text-chat.md](serial-text-chat.md)。

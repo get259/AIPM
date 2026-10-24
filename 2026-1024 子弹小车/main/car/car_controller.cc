@@ -47,20 +47,38 @@ void CarController::Initialize() {
     }
     ESP_LOGI(kTag, "Ready: LED=%s, UART=%s (unconfigured outputs remain disabled)",
              led_ready_ ? "enabled" : "disabled", uart_ready_ ? "enabled" : "disabled");
+    if (uart_ready_) {
+        // 输出实际生效的引脚，便于与两块板的交叉接线核对。
+        ESP_LOGI(kTag, "STM32 UART%d TX=GPIO%d RX=GPIO%d, 115200 8N1",
+                 CONFIG_CAR_UART_PORT, tx, rx);
+    }
 #endif
 }
 
-void CarController::FinishReply(bool complete) {
+bool CarController::AppendReply(const std::string& text) {
+    reply_.Append(text);
     uint8_t parsed = 0;
+    if (reply_.TakeAction(parsed)) {
+        ESP_LOGI(kTag, "Complete action JSON received; sending before tts.stop");
+        ApplyState(parsed);
+        return true;
+    }
+    return false;
+}
+
+bool CarController::FinishReply(bool complete) {
+    uint8_t parsed = 0;
+    const bool current_stop = !reply_.HasPendingStops();
     const auto result = reply_.Finish(complete, parsed);
     if (result == CarReply::Result::Ignored) {
-        ESP_LOGW(kTag, "Incomplete, aborted or oversized reply ignored");
-        return;
+        ESP_LOGD(kTag, "Reply already handled or incomplete; no further action");
+        return current_stop;
     }
     if (result == CarReply::Result::Invalid) {
         ESP_LOGW(kTag, "Invalid action JSON; applying zero state");
     }
     ApplyState(parsed);
+    return current_stop;
 }
 
 void CarController::ApplyState(uint8_t state) {

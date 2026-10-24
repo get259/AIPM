@@ -2,7 +2,7 @@
 
 ## 当前模式
 
-当前 PlatformIO 配置启用 `CONFIG_SERIAL_TEXT_CHAT=y`。电脑发送一行文字，设备通过原平台连接上传，服务端返回的 `tts.sentence_start.text` 打印到串口。
+当前 PlatformIO 已关闭 `CONFIG_SERIAL_TEXT_CHAT`，用于麦克风与 STM32 语音联调。下文描述重新启用 `CONFIG_SERIAL_TEXT_CHAT=y` 时的文字测试行为：电脑发送一行文字，设备通过原平台连接上传，服务端返回的 `tts.sentence_start.text` 打印到串口。
 
 测试模式关闭麦克风上传、唤醒检测、自动监听和小车动作输出；不会初始化小车业务 UART/LED。收到 `tts.start` 后汇总各段文字，等待明确 `is_aborted=false` 的 `tts.stop` 后校验格式。校验通过输出“格式正确”，再转换并显示状态字节及 `AA 55 STATE CRC8` 帧；校验未通过只输出“格式错误”，不转换、不输出零状态帧、不更新动作状态。测试阶段始终不执行动作或发送业务 UART 指令。联网、激活、WSS、令牌与平台原有恢复方式继续使用原实现，系统提示音保留。
 

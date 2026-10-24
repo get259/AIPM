@@ -10,19 +10,19 @@
 - 联网、OTA 激活、令牌、协议、音频采集与 Opus 使用 linx 原实现；用户明确异常恢复、WSS 与令牌处理不迁入旧工程策略。
 - 不引入 Arduino，不迁入旧 main.cpp、Inmp441、LinxClient 或 OtaGateway 的基础设施实现。
 - AI 返回完整五字段纯 JSON：forward、backward、turn_left、turn_right、fire，各值为字符串 on/off。不能从识别文字、关键词、表情或 MCP 工具触发小车动作。
-- 复用旧工程的受限解析器，允许乱序与 JSON 空白，拒绝缺失、重复、未知字段及非法值。非串口测试模式下，完整正常回复解析失败时输出全零状态；中断、超长或不完整回复丢弃，不扩展中断动作策略。当前串口测试模式遵循下述“格式错误后不执行”的新确认要求。
+- 复用受限解析器，允许乱序与 JSON 空白，拒绝缺失、重复、未知字段及非法值。语音控制收到完整合法 JSON 即下发，每轮仅一次，不再等 tts.stop。尚未下发时，正常完整结束的非法回复仍清零，中断、超长或空回复丢弃；已下发动作不因之后到达的中断或追加文本撤销。串口文字测试仍只在整轮结束后校验、不执行。
 - 用户已确认兼容转向字段别名：`turn_left`/`turnleft`、`turn_right`/`turnright`，同一动作字段的不同写法仍算重复并拒绝；不扩展其他字段或值。
 - bit 0～4 依次为前进、后退、左转、右转、发射/本地 LED；允许组合，bit 5～7 固定为 0。
 - STM32 执行运动；ESP32 仅发送状态并控制本地低有效 LED，不新增动作互斥或运动计时。
 - UART 115200，帧为 AA 55 STATE CRC8；CRC 覆盖前三字节，多项式 07、初值 00、不反射、结果异或 00。必须发送合法全零状态，不添加周期状态心跳。
-- UART TX/RX 与 LED GPIO 未确定，不代选或启用实际引脚；通过配置逐项启用，默认仅解析和记录状态。
-- 持续监听采用已有 AutoStop 会话循环：激活后自动开启会话，正常回复后继续监听；回复期间暂停上传，不自行启用 Realtime/AEC，也不增加断线自动恢复策略。
+- 用户已确认 UART1 TX=GPIO17、RX=GPIO21，分别连接 STM32 PA10、PA9，双方共地；本轮启用实际发送。LED GPIO 仍未确定，保持 -1。
+- 用户最新确认完整 JSON 下发后立即继续接收下一句，不等 tts.stop。自动小车控制且不播放 AI 回复时，复用原协议 realtime，回复期间持续上传；不启用新的 AEC 配置，不新增主动 abort 或断线自动恢复策略。此前 AutoStop 暂停上传的限制被本轮确认取代。
 
 ## 实现边界
 
 - 小车逻辑放在 main/car/；application 仅提供必要事件接入，全部业务状态在应用主任务中更新。
 - 异步回调必须复制 cJSON 字符串，不保留网络回调结束后失效的指针。
-- 以 tts.start 开始、sentence_start 追加、tts.stop 结束汇总；仅明确 is_aborted=false 且未被本地取消的完整回复可执行。重复开始不能清空本轮已收集文字，重复结束不能重复执行。
+- 以 tts.start 开始、sentence_start 追加并尝试严格解析完整缓冲；完整合法 JSON 立即下发，同轮只执行一次，重复 start 不清空缓冲和已执行标志。tts.stop 按序消耗已完成轮次记录，不清空下一轮缓冲、不重复下发；本地取消后不处理后续动作片段。纯文字测试仍保留原整轮结束与 is_aborted=false 校验。
 - 接入断线/错误时只丢弃未完成文字，不新增断网停机、三次重试或令牌处理。
 - 保留 linx 原音频基础设施；小车模式默认忽略服务端下行语音，避免播读控制 JSON，系统提示音保持原行为。MAX98357 是否用于其他播放留待确认。
 - 保留当前 PlatformIO 面包板编译配置；真实麦克风、屏幕、按键接线尚未验证。启用 UART/业务 LED 时必须核对它们与板级 I²S、显示、按键、状态灯及示例灯的 GPIO 不冲突。
@@ -30,7 +30,7 @@
 
 ## 当前状态
 
-- 已完成第一轮软件融合，尚未烧录或联调。当前硬件 GPIO 全部未配置，软件日志不能代替实际发送与 LED 动作。
+- 已完成软件融合，当前进入语音/UART 联调准备：关闭串口文字测试模式，启用 UART1 TX=17、RX=21。麦克风配置原本正确，保持 BCLK=5、WS=4、SD=6 左声道；尚未烧录或验证实机效果。LED 仍未配置。
 
 | 部分 | 已实现内容 | 位置 |
 | --- | --- | --- |
@@ -39,7 +39,7 @@
 | 状态与帧 | AA 55 STATE CRC8，清除预留位；有固定 CRC 测试向量 | main/car/car_frame.h、car_frame.cc |
 | 外设适配 | ESP-IDF UART 115200/8N1、低有效 LED；配置缺失或冲突时不启用对应输出 | main/car/car_controller.h、car_controller.cc |
 | 应用接入 | tts 事件汇总、会话 ID 检查、断线/错误缓冲清理、激活后自动监听、忽略下行控制语音 | main/application.cc、application.h |
-| 配置与构建 | CAR_CONTROL 隔离，现有 PlatformIO 环境启用，GPIO 默认 -1 | main/Kconfig.projbuild、main/CMakeLists.txt、sdkconfig.defaults.platformio |
+| 配置与构建 | CAR_CONTROL 隔离，现有 PlatformIO 环境启用，UART1 TX=17/RX=21，LED=-1 | main/Kconfig.projbuild、main/CMakeLists.txt、sdkconfig.defaults.platformio |
 | 业务测试 | 独立电脑端项目，使用工作区内测试编译器，不改系统 PATH | test-native/、test/test_car/、scripts/platformio_native.py |
 
 ## 验证结果（2026-10-24）
@@ -84,3 +84,38 @@
 - 不在需求未确认时自行补 GPIO、无响应超时时间或运动策略。
 - 保留原项目已有修改，不自动提交或推送。Git 操作仅限当前工作目录所属仓库；git add、commit、push 必须获得用户明确授权。
 - 若当前工作目录属于 Git 仓库且本次修改了其中尚未提交的文件，完成检查后仅询问一次是否提交；提交信息须 Conventional Commits、中文描述，并在提交前展示等待最终确认。
+
+## 麦克风与 STM32 联调配置（2026-10-24，覆盖此前串口文字测试启用状态）
+
+- 用户纠正目标工程为 linx-esp32；旁边 ESP32-S3 中助手本轮误做的源码、配置、文档和新增测试已逐项撤回，未使用 Git 重置，不迁入其 Arduino 基础设施。
+- 麦克风既有接线正确：INMP441 VDD=3V3、GND=GND、SCK/BCLK=GPIO5、WS/LRCLK=GPIO4、SD=GPIO6、L/R=GND 左声道，无需对调。
+- 关闭 CONFIG_SERIAL_TEXT_CHAT，恢复原麦克风上传、激活后自动监听与小车动作输出；保持原 AutoStop、回复后继续监听、下行控制语音忽略、原网络/令牌/异常策略。
+- UART1 115200/8N1，TX=GPIO17 → PA10，RX=GPIO21 ← PA9，共地；defaults 与已有 sdkconfig.esp32s3 同步。新增启动日志显示生效 UART 和引脚。没有新增回传解析、ACK、心跳、运动计时或停机策略。
+- 当前板型的麦克风、扬声器、显示、按键、状态灯及示例灯未占用 GPIO17/21；业务 LED 保持 -1 未启用。
+- 本轮电脑端 car_tests 实际执行 12 组全部通过；真实采音、UART 电气信号、STM32 收帧与运动仍待实机验证。
+
+- 本轮语音/UART 配置固件构建成功：静态 RAM 69,100 字节（21.1%），应用 2,638,759 / 4,128,768 字节（63.9%）。生成 `.pio/build/esp32s3/firmware.bin`；生成配置已核对文字模式关闭、自动监听开启、UART1 TX=17/RX=21。编译有依赖宏重定义/弃用及环境变量提示，无构建错误。串口枚举无可用设备，未烧录或进行实机联调。
+
+## LVGL 依赖目录恢复（2026-10-24）
+
+- 用户上传日志先出现 WinError 145（删除 LVGL tests 时目录非空），随后报 managed_components/lvgl__lvgl 不是组件；本地核实只剩 tests/xmls/zephyr 和哈希标记，缺少 CMakeLists.txt。并发任务等初始原因未确认，不作为确定结论。
+- 未发现正在运行的本工程构建任务。损坏目录保留到 .cache/component-recovery/lvgl__lvgl-damaged-20261024-180959，从本机组件缓存恢复锁定的 LVGL 9.3.0；源码哈希和逐文件 CHECKSUMS 校验通过，并保留与 dependencies.lock 一致的 .component_hash。
+- pio run -e esp32s3 重新构建成功；RAM=69,100 字节，应用=2,638,759 字节。本轮没有更改业务源码、硬件配置或执行烧录，用户可以重新尝试原 COM5 上传任务。不要同时运行多个构建/初始化/上传任务。
+
+## JSON 即时下发（2026-10-24，覆盖此前等待 tts.stop 的语音执行规则）
+
+- 用户确认：“收到完整 JSON 对象并通过严格校验后，立即发送动作，同一轮只执行一次。”这是本轮授权的执行时机变更。
+- CarReply 新增 TakeAction 和每轮 action_taken 标志，严格校验全部已收文本；CarController 在 AppendReply 时直接 ApplyState。Finish 对已下发轮次只清理，不重复动作或清零。重复 start 不重置标志，新轮次与 Reset 正常恢复。
+- 本地 aborted_ 为真时，application 不再追加动作文本。已经提前下发的动作不会被随后到达的中断、非法附加内容或溢出自动撤回；未提前下发的轮次仍保持原正常结束清零/异常丢弃策略。
+- 串口文字测试没有调用 TakeAction，仍等待完整正常结束后校验并只打印结果；网络、音频、GPIO 与 STM32 协议不变。
+- 电脑端 16 项业务测试实际执行全部通过；新增覆盖 128 种状态/转向别名组合的任意分段位置、重复事件不重复输出、全 off 即时停止、同片段尾随内容拒绝、非法对象、取消清理、溢出和 8192 字节边界。
+
+- 即时下发版本固件编译、链接成功：静态 RAM 69,100 字节（21.1%），应用 2,639,147 / 4,128,768 字节（63.9%），已更新 .pio/build/esp32s3/firmware.bin；尚未烧录，实际延迟待实测。构建仅有原依赖的宏重定义警告，无错误。
+
+## 连续监听与发布准备（2026-10-24）
+
+- 用户确认 JSON 下发后继续接收下一句，恢复监听不依赖 tts.stop。自动小车控制且不播放下行语音时，在 SetListeningMode 中将 AutoStop 入口转为原协议 realtime，回复期间保留音频处理，JSON 下发后回到 listening；音频处理仍在运行时不重复发送 listen.start。
+- STT 只作为新输入边界调用 NextInput，不作为动作依据。CarReply 保留待收旧 stop 的固定大小计数；旧 stop 按轮次顺序消耗，不清空下一轮半包。连接重置清理缓冲和计数，重复 start 仍不清空同轮内容。
+- 由于平台只提供会话 ID，按序关联假定同连接每轮一个 stop、STT 先于该句 TTS；跨轮重复/乱序结束事件无法无歧义区分，仍须实机验证。不新增主动 abort、AEC、本地关键词或异常停机策略。
+- 本轮固件构建成功：静态 RAM 69,100 字节、应用 2,639,647 字节；19 项业务测试和 5 项串口输入测试全部通过。STM32 当前源码为干净提交 6d132e0，重新构建与 ARM 模拟逻辑测试通过。新连续监听固件尚未烧录。
+- 用户明确授权提交 linx-esp32 与 stm32_motion，将发布版本保存至桌面 AI-powered_voice-controlled_publish 并提交、推送。发布目录已有自己的 origin；最终提交前仍需展示 Conventional Commits 中文信息并等待用户最终确认。源码 STM32 无新增修改时直接沿用已有提交，不创建空提交。

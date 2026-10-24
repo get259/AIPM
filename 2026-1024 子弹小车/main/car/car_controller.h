@@ -7,8 +7,9 @@ class CarController {
 public:
     void Initialize();
     void BeginReply() { reply_.Begin(); }
-    void AppendReply(const std::string& text) { reply_.Append(text); }
-    void FinishReply(bool complete);
+    bool AppendReply(const std::string& text);
+    bool FinishReply(bool complete);
+    void NextInput() { reply_.NextInput(); }
     void DiscardReply() { reply_.Reset(); }
 
 private:

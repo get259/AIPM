@@ -189,6 +189,182 @@ static void BufferExactBoundary() {
     TEST_ASSERT_EQUAL_UINT8(0x15, state);
 }
 
+static void ImmediateActionAtEveryFragmentBoundary() {
+    for (unsigned aliases = 0; aliases < 4; ++aliases) {
+        for (uint8_t expected = 0; expected < 32; ++expected) {
+            const auto text = JsonFor(expected, aliases);
+            for (size_t split = 0; split <= text.size(); ++split) {
+                CarReply reply;
+                uint8_t state = 0xff;
+                unsigned actions = 0;
+                reply.Begin();
+                reply.Append(text.data(), split);
+                if (reply.TakeAction(state)) ++actions;
+                TEST_ASSERT_EQUAL_UINT(split == text.size() ? 1 : 0, actions);
+                reply.Begin();  // 重复 start 不能擦除缓冲或重置本轮执行标志。
+                reply.Append(text.data() + split, text.size() - split);
+                if (reply.TakeAction(state)) ++actions;
+                TEST_ASSERT_EQUAL_UINT(1, actions);  // 无需等待 stop，已取得动作。
+                TEST_ASSERT_EQUAL_HEX8(expected, state);
+                TEST_ASSERT_FALSE(reply.TakeAction(state));
+                TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+                TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+                TEST_ASSERT_EQUAL_HEX8(expected, state);
+            }
+        }
+    }
+}
+
+static void EarlyActionIsNotRepeatedOrReverted() {
+    CarReply reply;
+    uint8_t state = 0xff;
+    reply.Begin();
+    reply.Append(JsonFor(1));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(1, state);
+    reply.Begin();
+    reply.Append(" extra");
+    reply.Append(JsonFor(2));
+    TEST_ASSERT_FALSE(reply.TakeAction(state));
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_EQUAL_HEX8(1, state);  // 后续内容不能把已发送动作覆盖为停止或另一个动作。
+
+    reply.Begin();
+    reply.Append(JsonFor(0));  // 下一轮合法全 off 必须立即发停止状态。
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(0, state);
+    TEST_ASSERT_TRUE(reply.Finish(false, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_EQUAL_HEX8(0, state);  // 之后到达的中断也不再次输出。
+}
+
+static void EarlyActionRejectsInvalidAndTrailingText() {
+    const std::string invalid[] = {
+        JsonFor(1) + " extra", JsonFor(1) + JsonFor(2),
+        "{\"forward\":\"on\"}",
+        "{\"forward\":\"off\",\"backward\":\"off\",\"turn_left\":\"on\",\"turnleft\":\"on\",\"fire\":\"off\"}",
+        "```json\n" + JsonFor(1) + "\n```"
+    };
+    for (const auto& text : invalid) {
+        CarReply reply;
+        uint8_t state = 0x15;
+        reply.Begin();
+        reply.Append(text);
+        TEST_ASSERT_FALSE(reply.TakeAction(state));
+        TEST_ASSERT_EQUAL_HEX8(0x15, state);
+        TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Invalid);
+        TEST_ASSERT_EQUAL_HEX8(0, state);  // 未提前执行时，正常结束的非法回复仍清零。
+    }
+}
+
+static void EarlyActionRespectsResetOverflowAndSizeLimit() {
+    CarReply reply;
+    const auto text = JsonFor(0x15);
+    uint8_t state = 0xff;
+    reply.Append(text);
+    TEST_ASSERT_FALSE(reply.TakeAction(state));  // 无 start 的片段不执行。
+    reply.Begin();
+    reply.Append(text.data(), text.size() - 1);
+    TEST_ASSERT_FALSE(reply.TakeAction(state));
+    reply.Reset();  // 取消/断线清理后，最后一段不得补成旧动作。
+    reply.Append("}");
+    TEST_ASSERT_FALSE(reply.TakeAction(state));
+    TEST_ASSERT_TRUE(reply.Finish(false, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_EQUAL_HEX8(0xff, state);
+
+    reply.Begin();
+    reply.Append(std::string(CarReply::kMaxBytes + 1, ' '));
+    reply.Append(text);
+    TEST_ASSERT_FALSE(reply.TakeAction(state));
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+
+    reply.Begin();
+    reply.Append(std::string(CarReply::kMaxBytes - text.size(), ' ') + text);
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(0x15, state);
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+}
+
+static void NextCommandDoesNotWaitForStop() {
+    CarReply reply;
+    uint8_t state = 0xff;
+    reply.NextInput();
+    reply.Begin();
+    reply.Append(JsonFor(1));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(1, state);
+    TEST_ASSERT_TRUE(reply.HasPendingStops());
+
+    // 前进尚未收到 stop，下一句“停止”已能独立解析并下发。
+    reply.NextInput();
+    reply.Begin();
+    reply.Append(JsonFor(0));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(0, state);
+    TEST_ASSERT_FALSE(reply.TakeAction(state));
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_TRUE(reply.HasPendingStops());
+    TEST_ASSERT_EQUAL_HEX8(0, state);
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_FALSE(reply.HasPendingStops());
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+
+    reply.NextInput();
+    reply.Begin();
+    reply.Append(JsonFor(2));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_EQUAL_HEX8(2, state);
+}
+
+static void LateStopPreservesNextPartialJson() {
+    const auto next = JsonFor(0);
+    for (size_t split = 0; split < next.size(); ++split) {
+        CarReply reply;
+        uint8_t state = 0xff;
+        reply.Begin();
+        reply.Append(JsonFor(1));
+        TEST_ASSERT_TRUE(reply.TakeAction(state));
+        reply.NextInput();
+        reply.Begin();
+        reply.Append(next.data(), split);
+        TEST_ASSERT_FALSE(reply.TakeAction(state));
+        // 上轮正常或中断 stop 都不能清空新轮次的半包。
+        TEST_ASSERT_TRUE(reply.Finish((split & 1) == 0, state) == CarReply::Result::Ignored);
+        TEST_ASSERT_EQUAL_HEX8(1, state);
+        reply.Begin();  // 同轮重复 start 仍保留缓冲。
+        reply.Append(next.data() + split, next.size() - split);
+        TEST_ASSERT_TRUE(reply.TakeAction(state));
+        TEST_ASSERT_EQUAL_HEX8(0, state);
+        TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+    }
+}
+
+static void ReplacedIncompleteReplyDoesNotPoisonNextInput() {
+    CarReply reply;
+    uint8_t state = 0x15;
+    reply.Begin();
+    reply.Append("{\"forward\":");
+    reply.NextInput();
+    TEST_ASSERT_TRUE(reply.HasPendingStops());
+    reply.Begin();
+    reply.Append(JsonFor(0));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    TEST_ASSERT_TRUE(reply.Finish(false, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_EQUAL_HEX8(0, state);
+    TEST_ASSERT_TRUE(reply.HasPendingStops());
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Ignored);
+    TEST_ASSERT_FALSE(reply.HasPendingStops());
+
+    reply.Begin();
+    reply.Append(JsonFor(1));
+    TEST_ASSERT_TRUE(reply.TakeAction(state));
+    reply.Reset();  // 断线时必须同时清除旧 stop 记录。
+    TEST_ASSERT_FALSE(reply.HasPendingStops());
+    reply.Begin();
+    reply.Append("invalid JSON");
+    TEST_ASSERT_TRUE(reply.Finish(true, state) == CarReply::Result::Invalid);
+    TEST_ASSERT_EQUAL_HEX8(0, state);
+}
+
 static void CrcAndFrameGoldenVectors() {
     const uint8_t check[] = {'1','2','3','4','5','6','7','8','9'};
     TEST_ASSERT_EQUAL_HEX8(0xF4, CarCrc8(check, sizeof(check)));
@@ -234,6 +410,13 @@ int main() {
     RUN_TEST(InvalidReplyClearsAndAllOffIsValid);
     RUN_TEST(DiscardAbortedOverflowAndStrayText);
     RUN_TEST(BufferExactBoundary);
+    RUN_TEST(ImmediateActionAtEveryFragmentBoundary);
+    RUN_TEST(EarlyActionIsNotRepeatedOrReverted);
+    RUN_TEST(EarlyActionRejectsInvalidAndTrailingText);
+    RUN_TEST(EarlyActionRespectsResetOverflowAndSizeLimit);
+    RUN_TEST(NextCommandDoesNotWaitForStop);
+    RUN_TEST(LateStopPreservesNextPartialJson);
+    RUN_TEST(ReplacedIncompleteReplyDoesNotPoisonNextInput);
     RUN_TEST(CrcAndFrameGoldenVectors);
     RUN_TEST(BinaryFrameGoldenVectors);
     return UNITY_END();

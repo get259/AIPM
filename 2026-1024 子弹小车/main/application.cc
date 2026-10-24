@@ -651,7 +651,13 @@ void Application::InitializeProtocol() {
 #endif
                 ]() {
 #if CONFIG_CAR_CONTROL
-                    if (car_event) car_.FinishReply(car_complete && !aborted_);
+                    if (car_event) {
+                        const bool current_stop = car_.FinishReply(car_complete && !aborted_);
+#if CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO
+                        // JSON 已执行的旧 stop 只记账，不能等待播放或影响下一句。
+                        if (!current_stop && listening_mode_ == kListeningModeRealtime) return;
+#endif
+                    }
 #endif
 
                     //是否中断播放 //默认会清空队列
@@ -680,7 +686,16 @@ void Application::InitializeProtocol() {
 #endif
                     ]() {
 #if CONFIG_CAR_CONTROL
-                        if (car_event) car_.AppendReply(message);
+                        // 本地已取消的回复不能在后续片段到达时提前触发动作。
+                        if (car_event && !aborted_ && car_.AppendReply(message)) {
+#if CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO
+                            if (listening_mode_ == kListeningModeRealtime &&
+                                GetDeviceState() == kDeviceStateSpeaking) {
+                                ESP_LOGI(TAG, "Action sent; listening for next command without waiting for tts.stop");
+                                SetDeviceState(kDeviceStateListening);
+                            }
+#endif
+                        }
 #endif
                         display->SetChatMessage("assistant", message.c_str());
                     });
@@ -690,7 +705,21 @@ void Application::InitializeProtocol() {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
-                Schedule([this, display, message = std::string(text->valuestring)]() {
+#if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO && !CONFIG_SERIAL_TEXT_CHAT
+                auto session = cJSON_GetObjectItem(root, "session_id");
+                const bool next_car_input = session == nullptr ||
+                    (cJSON_IsString(session) && (protocol_->session_id().empty() ||
+                     protocol_->session_id() == session->valuestring));
+#endif
+                Schedule([this, display, message = std::string(text->valuestring)
+#if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO && !CONFIG_SERIAL_TEXT_CHAT
+                          , next_car_input
+#endif
+                ]() {
+#if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO && !CONFIG_SERIAL_TEXT_CHAT
+                    // 仅用 STT 事件区分下一句，识别文字本身不触发任何运动。
+                    if (next_car_input && listening_mode_ == kListeningModeRealtime) car_.NextInput();
+#endif
                     display->SetChatMessage("user", message.c_str());
                 });
             }
@@ -1036,6 +1065,14 @@ void Application::AbortSpeaking(AbortReason reason) {
 }
 
 void Application::SetListeningMode(ListeningMode mode) {
+#if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO && !CONFIG_SERIAL_TEXT_CHAT
+    // 小车不播放 AI 控制语音，使用平台已有 realtime 通道持续上传下一句。
+    // 不通过开启设备/服务端 AEC 来间接切换模式，也不新增主动 abort 流程。
+    if (mode == kListeningModeAutoStop) {
+        mode = kListeningModeRealtime;
+        ESP_LOGI(TAG, "Car continuous listening: mode=realtime, microphone stays active during replies");
+    }
+#endif
     listening_mode_ = mode;
     SetDeviceState(kDeviceStateListening);
 }
