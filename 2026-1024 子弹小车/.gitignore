@@ -2,6 +2,12 @@ tmp/
 components/
 managed_components/
 build/
+.pio/
+platformio-build.log
+platformio-car-tests.log
+platformio-serial-build.log
+sdkconfig.esp32s3
+sdkconfig.esp32s3.old
 .vscode/
 .devcontainer/
 sdkconfig.old

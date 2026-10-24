@@ -17,6 +17,15 @@
 #include "device_state.h"
 #include "device_state_machine.h"
 
+#if CONFIG_SERIAL_TEXT_CHAT
+#include "serial_chat/serial_console.h"
+#include "car/car_reply.h"
+#endif
+
+#if CONFIG_CAR_CONTROL
+#include "car/car_controller.h"
+#endif
+
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO           (1 << 1)
@@ -134,6 +143,20 @@ private:
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
+#if CONFIG_SERIAL_TEXT_CHAT
+    SerialConsole serial_console_;
+    CarReply serial_reply_;
+    bool serial_platform_ready_ = false;
+    bool serial_network_ready_ = false;
+    bool serial_waiting_ = false;
+    void SendSerialText(const std::string& text);
+    void FinishSerialText(const char* message);
+    void HandleSerialReply(const std::string& state, const std::string& text,
+                           const std::string& session, bool has_session, bool aborted);
+#endif
+#if CONFIG_CAR_CONTROL
+    CarController car_;
+#endif
     std::unique_ptr<Ota> ota_;
 
     bool has_server_time_ = false;

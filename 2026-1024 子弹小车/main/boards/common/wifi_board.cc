@@ -56,6 +56,9 @@ void WifiBoard::StartNetwork() {
     WifiManagerConfig config;
     config.ssid_prefix = "XiaoQiu";
     config.language = Lang::CODE;
+#if CONFIG_WIFI_ACTIVATION_PORTAL
+    config.activation_portal = true;
+#endif
     wifi_manager.Initialize(config);
 
     // Set unified event callback - forward to NetworkEvent with SSID data
@@ -133,7 +136,7 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
             ESP_LOGI(TAG, "WiFi config mode exited");
             in_config_mode_ = false;
             // Try to connect with the new credentials
-            TryWifiConnect();
+            if (!WifiManager::GetInstance().IsConnected()) TryWifiConnect();
             break;
         default:
             break;
@@ -272,7 +275,7 @@ std::string WifiBoard::GetBoardJson() {
     std::string json = R"({"type":")" + std::string(BOARD_TYPE) + R"(",)";
     json += R"("name":")" + std::string(BOARD_NAME) + R"(",)";
 
-    if (!wifi.IsConfigMode()) {
+    if (!wifi.IsConfigMode() || wifi.IsConnected()) {
         json += R"("ssid":")" + wifi.GetSsid() + R"(",)";
         json += R"("rssi":)" + std::to_string(wifi.GetRssi()) + R"(,)";
         json += R"("channel":)" + std::to_string(wifi.GetChannel()) + R"(,)";
@@ -281,6 +284,12 @@ std::string WifiBoard::GetBoardJson() {
 
     json += R"("mac":")" + SystemInfo::GetMacAddress() + R"("})";
     return json;
+}
+
+void WifiBoard::UpdateActivationStatus(const std::string& state, const std::string& code, const std::string& message) {
+#if CONFIG_WIFI_ACTIVATION_PORTAL
+    WifiManager::GetInstance().SetActivationStatus(state, code, message);
+#endif
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {

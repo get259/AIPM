@@ -40,6 +40,18 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols")
 
+if(CONFIG_SERIAL_TEXT_CHAT)
+    list(APPEND SOURCES "serial_chat/serial_console.cc")
+endif()
+
+# 小车模块按配置启用，避免影响其他板型的默认行为。
+if(CONFIG_CAR_CONTROL OR CONFIG_SERIAL_TEXT_CHAT)
+    list(APPEND SOURCES "car/ActionJson.cpp" "car/car_reply.cc" "car/car_frame.cc")
+endif()
+if(CONFIG_CAR_CONTROL)
+    list(APPEND SOURCES "car/car_controller.cc")
+endif()
+
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
 list(APPEND SOURCES ${BOARD_COMMON_SOURCES})

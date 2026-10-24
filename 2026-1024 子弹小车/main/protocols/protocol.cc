@@ -54,6 +54,21 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
     SendText(json);
 }
 
+bool Protocol::SendUserText(const std::string& text) {
+    // 沿用 listen/detect 文本入口，通过 cJSON 转义用户输入，避免破坏协议结构。
+    cJSON* root = cJSON_CreateObject();
+    if (root == nullptr) return false;
+    const bool valid = cJSON_AddStringToObject(root, "session_id", session_id_.c_str()) &&
+        cJSON_AddStringToObject(root, "type", "listen") &&
+        cJSON_AddStringToObject(root, "state", "detect") &&
+        cJSON_AddStringToObject(root, "text", text.c_str());
+    char* json = valid ? cJSON_PrintUnformatted(root) : nullptr;
+    const bool sent = json != nullptr && SendText(json);
+    cJSON_free(json);
+    cJSON_Delete(root);
+    return sent;
+}
+
 void Protocol::SendStartListening(ListeningMode mode) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\"";

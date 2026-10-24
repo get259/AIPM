@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wi-Fi 配置与设备激活</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #f7f8fa; color: #20252c; font-family: Arial, sans-serif; }
+        main { max-width: 480px; margin: 8vh auto; padding: 28px 22px; text-align: center; }
+        .check { width: 64px; height: 64px; margin: 0 auto 22px; border-radius: 50%; background: #e2f3e8; color: #21874c; font-size: 42px; line-height: 64px; }
+        h1 { font-size: 24px; margin: 0 0 12px; }
+        p { line-height: 1.65; }
+        #activation-panel { background: white; border: 1px solid #e0e4e8; border-radius: 14px; margin-top: 24px; padding: 20px; }
+        #activation-code { font-size: 38px; font-weight: bold; letter-spacing: 6px; overflow-wrap: anywhere; margin: 12px 0 20px; }
+        button { border: 0; border-radius: 8px; background: #287a50; color: white; padding: 12px 22px; font-size: 16px; cursor: pointer; }
+        #hint { color: #64707d; font-size: 14px; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+<main>
+    <div class="check" aria-hidden="true">✓</div>
+    <h1>Wi-Fi 配置成功</h1>
+    <p id="status" role="status" aria-live="polite">正在获取设备激活状态…</p>
+    <section id="activation-panel" hidden aria-label="设备激活码">
+        <div>灵矽平台激活码</div>
+        <div id="activation-code"></div>
+        <button id="copy-code" type="button" disabled>复制激活码</button>
+        <p>请在灵矽平台完成设备绑定。可使用移动网络或另一台设备操作平台。</p>
+    </section>
+    <p id="activation-message"></p>
+    <p id="hint">请保持连接当前设备热点，页面会自动更新。</p>
+</main>
+<script>
+    // 激活状态只展示服务端返回的文本，不将内容拼接为 HTML。
+    const statusLabel = document.getElementById('status');
+    const panel = document.getElementById('activation-panel');
+    const codeLabel = document.getElementById('activation-code');
+    const messageLabel = document.getElementById('activation-message');
+    const hintLabel = document.getElementById('hint');
+    const copyButton = document.getElementById('copy-code');
+    let activationStarted = false;
+    let finished = false;
+
+    async function exitConfig() {
+        try { await fetch('/exit', { method: 'POST', cache: 'no-store' }); }
+        catch (_) { /* 热点自动关闭时，请求可能因连接断开而结束。 */ }
+    }
+
+    async function pollActivation() {
+        if (finished) return;
+        try {
+            const response = await fetch('/activation/status', { cache: 'no-store' });
+            if (!response.ok) throw new Error('status');
+            const data = await response.json();
+            if (data.enabled === false) {
+                finished = true;
+                statusLabel.textContent = '配置成功！';
+                hintLabel.textContent = '设备正在连接网络。';
+                setTimeout(exitConfig, 1000);
+                return;
+            }
+            if (data.enabled !== true || !['idle', 'connecting', 'waiting', 'ready', 'error'].includes(data.state)) {
+                throw new Error('invalid status');
+            }
+            const code = typeof data.code === 'string' ? data.code : '';
+            codeLabel.textContent = data.state === 'ready' ? '' : code;
+            panel.hidden = !codeLabel.textContent;
+            copyButton.disabled = panel.hidden;
+            messageLabel.textContent = typeof data.message === 'string' ? data.message : '';
+            if (data.state === 'ready') {
+                finished = true;
+                statusLabel.textContent = '设备绑定成功';
+                hintLabel.textContent = '热点即将关闭，设备将继续使用已配置的 Wi-Fi。';
+                setTimeout(exitConfig, 1500);
+                return;
+            }
+            statusLabel.textContent = data.state === 'waiting' ? '请使用下方激活码绑定设备' :
+                data.state === 'error' ? '暂时未能完成激活' : '正在连接灵矽平台…';
+            hintLabel.textContent = '请保持连接当前设备热点，页面会自动更新。';
+            if (!activationStarted) {
+                const start = await fetch('/activation/start', { method: 'POST', cache: 'no-store' });
+                if (!start.ok) throw new Error('start');
+                activationStarted = true;
+            }
+        } catch (_) {
+            hintLabel.textContent = '暂时无法获取状态，请确认仍连接设备热点，页面会自动重试。';
+        }
+        setTimeout(pollActivation, 1500);
+    }
+
+    copyButton.addEventListener('click', async function() {
+        const code = codeLabel.textContent;
+        if (!code) return;
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(code);
+            } else {
+                // 热点页面为 HTTP，兼容不支持 Clipboard API 的手机浏览器。
+                const input = document.createElement('textarea');
+                input.value = code;
+                input.readOnly = true;
+                document.body.appendChild(input);
+                input.select();
+                const copied = document.execCommand('copy');
+                input.remove();
+                if (!copied) throw new Error('copy');
+            }
+            hintLabel.textContent = '激活码已复制。';
+        } catch (_) { hintLabel.textContent = '请长按上方激活码复制。'; }
+    });
+    window.addEventListener('load', pollActivation);
+</script>
+</body>
+</html>

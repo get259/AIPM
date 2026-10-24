@@ -11,6 +11,10 @@
 #include "settings.h"
 
 #include <cstring>
+#include <cstdio>
+#if CONFIG_SERIAL_TEXT_CHAT
+#include "car/car_frame.h"
+#endif
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -61,6 +65,20 @@ bool Application::SetDeviceState(DeviceState state) {
 void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
+
+#if CONFIG_CAR_CONTROL && !CONFIG_SERIAL_TEXT_CHAT
+    car_.Initialize();
+#endif
+
+#if CONFIG_SERIAL_TEXT_CHAT
+    if (!serial_console_.Start([this](std::string text) {
+        Schedule([this, text = std::move(text)]() { SendSerialText(text); });
+    })) {
+        printf("[串口测试] 接收任务启动失败，请检查控制台配置\n");
+    } else {
+        printf("[串口测试] 已启用：UTF-8，每行最多 1024 字节；等待联网激活\n");
+    }
+#endif
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -183,6 +201,12 @@ void Application::Run() {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+#if CONFIG_SERIAL_TEXT_CHAT
+            FinishSerialText("平台错误，本轮结束");
+#endif
+#if CONFIG_CAR_CONTROL
+            car_.DiscardReply();
+#endif
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
@@ -217,6 +241,10 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+#if CONFIG_SERIAL_TEXT_CHAT
+                // 文字测试期间丢弃任何残留音频，不上传麦克风数据。
+                continue;
+#endif
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     break;
                 }
@@ -257,6 +285,9 @@ void Application::Run() {
 }
 
 void Application::HandleNetworkConnectedEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    serial_network_ready_ = true;
+#endif
     ESP_LOGI(TAG, "Network connected");
     auto state = GetDeviceState();
 
@@ -282,6 +313,13 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    serial_network_ready_ = false;
+    FinishSerialText("网络断开，本轮结束");
+#endif
+#if CONFIG_CAR_CONTROL
+    car_.DiscardReply();
+#endif
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening || state == kDeviceStateSpeaking) {
@@ -302,6 +340,16 @@ void Application::HandleActivationDoneEvent() {
 
     has_server_time_ = ota_->HasServerTime();
 
+    // 版本检查线程结束不一定等于绑定成功；必须实际取得连接配置。
+    const bool activation_ready = !ota_->HasActivationCode() && !ota_->HasActivationChallenge() &&
+        (ota_->HasMqttConfig() || ota_->HasWebsocketConfig());
+#if CONFIG_SERIAL_TEXT_CHAT
+    serial_platform_ready_ = activation_ready;
+    printf("[串口测试] %s\n", activation_ready ? "平台配置就绪，请发送一行文字" : "尚未完成激活，请先绑定设备");
+#endif
+    Board::GetInstance().UpdateActivationStatus(activation_ready ? "ready" : "error", "",
+        activation_ready ? "设备已激活，热点即将关闭" : "暂未取得平台连接配置，请查看设备提示");
+
     auto display = Board::GetInstance().GetDisplay();
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());
@@ -314,9 +362,14 @@ void Application::HandleActivationDoneEvent() {
     ota_.reset();
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+#if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_SERIAL_TEXT_CHAT
+    // 使用现有自动分轮会话入口；后续正常 tts.stop 仍由原状态机恢复监听。
+    ToggleChatState();
+#endif
 }
 
 void Application::ActivationTask() {
+    Board::GetInstance().UpdateActivationStatus("connecting", "", "正在连接灵矽平台…");
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
@@ -403,6 +456,7 @@ void Application::CheckNewVersion() {
 
         esp_err_t err = ota_->CheckVersion();
         if (err != ESP_OK) {
+            board.UpdateActivationStatus("error", "", "连接平台失败，设备正在按原流程重试");
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
@@ -486,18 +540,34 @@ void Application::InitializeProtocol() {
         DismissAlert();
     });
 
+#if CONFIG_SERIAL_TEXT_CHAT
+    protocol_->OnDisconnected([this]() {
+        Schedule([this]() { FinishSerialText("平台连接断开，本轮结束"); });
+    });
+#endif
+
     protocol_->OnNetworkError([this](const std::string& message) {
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+#if CONFIG_SERIAL_TEXT_CHAT
+        return;
+#endif
+#if CONFIG_CAR_CONTROL && !CONFIG_CAR_REPLY_AUDIO
+        // 保留音频采集/编码链路，只忽略控制 JSON 对应的下行语音。
+        return;
+#endif
         if (GetDeviceState() == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
     
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
+#if CONFIG_CAR_CONTROL
+        Schedule([this]() { car_.DiscardReply(); });
+#endif
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
@@ -508,6 +578,12 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+#if CONFIG_SERIAL_TEXT_CHAT
+            FinishSerialText("会话关闭，本轮结束");
+#endif
+#if CONFIG_CAR_CONTROL
+            car_.DiscardReply();
+#endif
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -517,10 +593,41 @@ void Application::InitializeProtocol() {
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
+        if (!cJSON_IsString(type)) return;
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
+            if (!cJSON_IsString(state)) return;
+#if CONFIG_SERIAL_TEXT_CHAT
+            {
+                // 复制回调数据，再交给主任务处理；文字测试回复不进入小车解析链路。
+                const auto text = cJSON_GetObjectItem(root, "text");
+                const auto session = cJSON_GetObjectItem(root, "session_id");
+                const auto aborted = cJSON_GetObjectItem(root, "is_aborted");
+                Schedule([this, reply_state = std::string(state->valuestring),
+                          reply_text = std::string(cJSON_IsString(text) ? text->valuestring : ""),
+                          reply_session = std::string(cJSON_IsString(session) ? session->valuestring : ""),
+                          has_session = session != nullptr,
+                          is_aborted = !cJSON_IsBool(aborted) || cJSON_IsTrue(aborted)]() {
+                    HandleSerialReply(reply_state, reply_text, reply_session, has_session, is_aborted);
+                });
+                return;
+            }
+#endif
+#if CONFIG_CAR_CONTROL
+            auto session = cJSON_GetObjectItem(root, "session_id");
+            const bool car_event = session == nullptr ||
+                (cJSON_IsString(session) && (protocol_->session_id().empty() ||
+                 protocol_->session_id() == session->valuestring));
+#endif
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
+                Schedule([this
+#if CONFIG_CAR_CONTROL
+                          , car_event
+#endif
+                ]() {
+#if CONFIG_CAR_CONTROL
+                    if (car_event) car_.BeginReply();
+#endif
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
@@ -534,7 +641,18 @@ void Application::InitializeProtocol() {
                 }
               
                 
-                Schedule([this, is_aborted_bool]() {
+                // 小车沿用旧工程约定：必须明确给出 is_aborted=false 才执行。
+#if CONFIG_CAR_CONTROL
+                const bool car_complete = cJSON_IsBool(is_aborted) && !is_aborted_bool;
+#endif
+                Schedule([this, is_aborted_bool
+#if CONFIG_CAR_CONTROL
+                          , car_event, car_complete
+#endif
+                ]() {
+#if CONFIG_CAR_CONTROL
+                    if (car_event) car_.FinishReply(car_complete && !aborted_);
+#endif
 
                     //是否中断播放 //默认会清空队列
                     if (!is_aborted_bool) {
@@ -556,7 +674,14 @@ void Application::InitializeProtocol() {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    Schedule([this, display, message = std::string(text->valuestring)]() {
+                    Schedule([this, display, message = std::string(text->valuestring)
+#if CONFIG_CAR_CONTROL
+                              , car_event
+#endif
+                    ]() {
+#if CONFIG_CAR_CONTROL
+                        if (car_event) car_.AppendReply(message);
+#endif
                         display->SetChatMessage("assistant", message.c_str());
                     });
                 }
@@ -624,6 +749,7 @@ void Application::InitializeProtocol() {
 }
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
+    Board::GetInstance().UpdateActivationStatus("waiting", code, message);
     struct digit_sound {
         char digit;
         const std::string_view& sound;
@@ -686,6 +812,9 @@ void Application::StopListening() {
 }
 
 void Application::HandleToggleChatEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    return;
+#endif
     auto state = GetDeviceState();
     
     if (state == kDeviceStateActivating) {
@@ -723,6 +852,9 @@ void Application::HandleToggleChatEvent() {
 }
 
 void Application::HandleStartListeningEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    return;
+#endif
     auto state = GetDeviceState();
     
     if (state == kDeviceStateActivating) {
@@ -755,6 +887,9 @@ void Application::HandleStartListeningEvent() {
 }
 
 void Application::HandleStopListeningEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    return;
+#endif
     auto state = GetDeviceState();
     
     if (state == kDeviceStateAudioTesting) {
@@ -770,6 +905,9 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    return;
+#endif
     if (!protocol_) {
         return;
     }
@@ -819,6 +957,16 @@ void Application::HandleStateChangedEvent() {
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
+
+#if CONFIG_SERIAL_TEXT_CHAT
+    // 保留系统提示音与界面，禁止状态切换重新开启麦克风或唤醒检测。
+    audio_service_.EnableVoiceProcessing(false);
+    audio_service_.EnableWakeWordDetection(false);
+    if (new_state == kDeviceStateIdle) display->SetStatus(Lang::Strings::STANDBY);
+    else if (new_state == kDeviceStateConnecting) display->SetStatus(Lang::Strings::CONNECTING);
+    else if (new_state == kDeviceStateSpeaking) display->SetStatus(Lang::Strings::SPEAKING);
+    return;
+#endif
     
     switch (new_state) {
         case kDeviceStateUnknown:
@@ -958,6 +1106,9 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
+#if CONFIG_SERIAL_TEXT_CHAT
+    return;
+#endif
     if (!protocol_) {
         return;
     }
@@ -1004,6 +1155,10 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
 }
 
 bool Application::CanEnterSleepMode() {
+#if CONFIG_SERIAL_TEXT_CHAT
+    // 文字测试需要随时接收电脑输入。
+    return false;
+#endif
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
     }
@@ -1062,6 +1217,10 @@ void Application::PlaySound(const std::string_view& sound) {
 
 void Application::ResetProtocol() {
     Schedule([this]() {
+#if CONFIG_SERIAL_TEXT_CHAT
+        serial_platform_ready_ = false;
+        FinishSerialText("平台配置重置，本轮结束");
+#endif
         // Close audio channel if opened
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
             protocol_->CloseAudioChannel();
@@ -1070,4 +1229,76 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
+
+#if CONFIG_SERIAL_TEXT_CHAT
+void Application::SendSerialText(const std::string& text) {
+    if (!serial_network_ready_ || !serial_platform_ready_ || !protocol_ ||
+        GetDeviceState() != kDeviceStateIdle) {
+        printf("[串口测试] 尚未就绪，请等待联网激活或当前操作完成后重新发送\n");
+        serial_console_.Release();
+        return;
+    }
+    listening_mode_ = kListeningModeManualStop;
+    if (!protocol_->IsAudioChannelOpened()) {
+        SetDeviceState(kDeviceStateConnecting);
+        if (!protocol_->OpenAudioChannel()) {
+            printf("[串口测试] 平台会话建立失败，请检查连接后重新发送\n");
+            SetDeviceState(kDeviceStateIdle);
+            serial_console_.Release();
+            return;
+        }
+        // 原状态机不允许 connecting 直接进入 speaking，建立会话后先返回 idle。
+        SetDeviceState(kDeviceStateIdle);
+    }
+    serial_reply_.Reset();
+    serial_waiting_ = true;
+    SetDeviceState(kDeviceStateSpeaking);
+    Board::GetInstance().GetDisplay()->SetChatMessage("user", text.c_str());
+    if (!protocol_->SendUserText(text)) {
+        FinishSerialText("发送失败，请检查连接后重新发送");
+        return;
+    }
+    printf("[已发送] %s\n", text.c_str());
+}
+
+void Application::FinishSerialText(const char* message) {
+    serial_reply_.Reset();
+    if (!serial_waiting_) return;
+    serial_waiting_ = false;
+    printf("[串口测试] %s\n", message);
+    SetDeviceState(kDeviceStateIdle);
+    serial_console_.Release();
+}
+
+void Application::HandleSerialReply(const std::string& state, const std::string& text,
+                                    const std::string& session, bool has_session, bool aborted) {
+    if (!serial_waiting_ || !protocol_) return;
+    if (has_session && (session.empty() || session != protocol_->session_id())) return;
+    if (state == "start") {
+        serial_reply_.Begin();
+        printf("[AI] 回复开始\n");
+    } else if (state == "sentence_start") {
+        serial_reply_.Append(text);
+        printf("[AI] %s\n", text.c_str());
+        Board::GetInstance().GetDisplay()->SetChatMessage("assistant", text.c_str());
+    } else if (state == "stop") {
+        // 只在明确完整结束后解析整轮文字，测试结果不交给动作控制器。
+        uint8_t parsed = 0;
+        const auto result = serial_reply_.Finish(!aborted, parsed);
+        if (result == CarReply::Result::Valid) {
+            printf("格式正确\n");
+            // 仅在校验通过时构造测试数据，不写业务 UART，不更新动作状态。
+            const auto frame = BuildCarFrame(parsed);
+            const auto binary = FormatCarFrameBinary(frame);
+            printf("[状态字节] %.8s (0x%02X)\n", binary.data() + 18, frame[2]);
+            printf("[二进制数据] %s\n", binary.data());
+            printf("[十六进制帧] %02X %02X %02X %02X\n", frame[0], frame[1], frame[2], frame[3]);
+        } else {
+            // 校验失败或回复不完整时，仅报告错误，不构造或输出任何动作帧。
+            printf("格式错误\n");
+        }
+        FinishSerialText(aborted ? "回复结束（中断或完成标记未明确）" : "回复结束");
+    }
+}
+#endif
 

@@ -47,6 +47,7 @@ public:
      * This function returns immediately. Network events are notified through the callback set by SetNetworkEventCallback().
      */
     virtual void StartNetwork() override;
+    void UpdateActivationStatus(const std::string& state, const std::string& code, const std::string& message) override;
     
     virtual NetworkInterface* GetNetwork() override;
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) override;

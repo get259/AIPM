@@ -75,6 +75,10 @@ public:
     virtual Camera* GetCamera();
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
+    // 默认空实现，只有启用网页激活的 WiFi 板型发布本地页面状态。
+    virtual void UpdateActivationStatus(const std::string& state, const std::string& code, const std::string& message) {
+        (void)state; (void)code; (void)message;
+    }
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);

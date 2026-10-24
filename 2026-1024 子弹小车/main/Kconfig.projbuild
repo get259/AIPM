@@ -1,10 +1,71 @@
 menu "Xiaozhi Assistant"
 
+config SERIAL_TEXT_CHAT
+    bool "Enable console text chat test mode"
+    depends on ESP_CONSOLE_UART || ESP_CONSOLE_USB_SERIAL_JTAG
+    default n
+    help
+        电脑通过现有控制台发送 UTF-8 文本行，复用平台连接请求 AI 回复。
+        测试模式停用麦克风上传、唤醒与小车动作输出，回复显示在串口。
+        支持已配置的 UART 控制台及 USB Serial/JTAG 控制台。
+
+menuconfig CAR_CONTROL
+    bool "Enable car JSON control"
+    depends on IDF_TARGET_ESP32S3
+    default n
+    help
+        将完整 AI 回复解析为五字段动作状态，由 STM32 执行运动。
+        默认不绑定 UART 和业务 LED 引脚，不修改原有网络恢复方式。
+
+if CAR_CONTROL
+    config CAR_AUTO_LISTEN
+        bool "Start listening after activation"
+        default y
+        help
+            复用现有会话循环；正常回复后继续监听，不增加断线重连策略。
+
+    config CAR_REPLY_AUDIO
+        bool "Play server reply audio"
+        default n
+        help
+            默认忽略服务端下行音频，避免播放控制 JSON；系统提示音保持原行为。
+
+    config CAR_UART_PORT
+        int "STM32 UART port"
+        range 1 2
+        default 1
+
+    config CAR_UART_TX_GPIO
+        int "STM32 UART TX GPIO (-1 disables UART)"
+        range -1 48
+        default -1
+
+    config CAR_UART_RX_GPIO
+        int "STM32 UART RX GPIO (-1 disables UART)"
+        range -1 48
+        default -1
+
+    config CAR_LED_GPIO
+        int "Active-low fire LED GPIO (-1 disables LED)"
+        range -1 48
+        default -1
+        help
+            启用前核对 GPIO 与当前板型的 I2S、显示、按键及状态灯不冲突。
+endif
+
 config OTA_URL
     string "Default OTA URL"
     default "https://xrobo.qiniuapi.com/v1/ota/"
     help
         The application will access this URL to check for new firmwares and server address.
+
+config WIFI_ACTIVATION_PORTAL
+    bool "Show platform activation code in WiFi setup page"
+    depends on USE_HOTSPOT_WIFI_PROVISIONING
+    default n
+    help
+        配网后保留热点，在成功页显示灵矽激活码和状态。
+        激活成功后关闭热点并保留路由器连接，不改变平台鉴权方式。
 
 choice
     prompt "Flash Assets"
