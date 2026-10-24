@@ -1,0 +1,214 @@
+# 小智 AI 聊天机器人 - 你的智能对话伙伴
+
+（中文 | [English](README_en.md) | [日本語](README_ja.md)）
+
+## 🎯 什么是小智 AI？
+
+小智 AI 是一个基于 ESP32 的开源 AI 语音对话机器人项目，让你能够亲手打造一个属于自己的 AI 助手！
+
+### 🌟 项目亮点
+- **零基础可上手** - 详细的 Mac/Linux/Windows 安装指南
+- **70+ 种硬件支持** - 从面包板到商业开发板
+- **强大的 AI 能力** - 集成 Qwen/DeepSeek 等大模型
+- **语音交互** - 离线唤醒 + 流式对话
+- **开源免费** - MIT 协议，可商用
+
+<img src="docs/mcp-based-graph.jpg" alt="通过MCP控制万物" width="320">
+
+## 🚀 快速开始（Mac 用户专用指南）
+
+### 方案一：免开发环境烧录（推荐新手）
+
+如果你是第一次接触 ESP32，建议直接使用预编译固件：
+
+1. 访问 [ESP Launchpad](https://espressif.github.io/esp-launchpad/) 网页版烧录工具
+2. 选择小智 AI 固件
+3. 连接 ESP32 开发板
+4. 一键烧录，无需安装任何软件
+
+👉 [详细烧录教程](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
+
+### 方案二：Mac 开发环境搭建（适合开发者）
+
+#### 第一步：安装前置依赖
+```bash
+brew install cmake ninja dfu-util ccache python3
+```
+
+#### 第二步：获取 ESP-IDF 开发框架
+```bash
+mkdir ~/github
+cd ~/github
+git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git
+```
+
+#### 第三步：安装 ESP32 工具链
+```bash
+cd ~/github/esp-idf
+./install.sh esp32s3  # 如果你使用 ESP32-S3
+```
+
+#### 第四步：设置环境变量
+在 `~/.zshrc` 中添加：
+```bash
+alias get_idf='. $HOME/github/esp-idf/export.sh'
+```
+
+然后执行：
+```bash
+source ~/.zshrc
+```
+
+#### 第五步：获取小智 AI 源码
+```bash
+cd ~/github
+git clone https://github.com/sunqirui1987/linx-esp32.git
+cd linx-esp32
+```
+
+#### 第六步：编译和烧录
+```bash
+get_idf              # 激活 ESP-IDF 环境
+idf.py set-target esp32s3  # 设置目标芯片
+idf.py menuconfig    # 配置项目 (选择版框)
+idf.py build         # 编译固件
+idf.py flash monitor # 烧录并监控
+```
+
+🎉 成功！你的小智 AI 现在已经运行了。
+
+## 🛠️ 支持的硬件平台
+
+### 新手推荐（性价比高）
+- **ESP32-S3-BOX3** - 乐鑫官方开发板，一体化设计
+- **立创·实战派 ESP32-S3** - 国产优质开发板
+- **M5Stack CoreS3** - 模块化设计，扩展性强
+
+### 面包板 DIY（动手党最爱）
+- **ESP32-S3 核心板** + 麦克风 + 扬声器 + 屏幕
+- 成本约 50-100 元，适合学生党
+- [面包板接线图](docs/v1/wiring2.jpg)
+
+### 特色硬件（个性选择）
+- **神奇按钮 2.4** - 可爱外形，适合桌面摆放
+- **LILYGO T-Circle-S3** - 圆形屏幕，独特设计
+- **虾哥 Mini C3** - 超小体积，便携性强
+
+📋 [完整硬件支持列表](https://ccnphfhqs21z.feishu.cn/wiki/F5krwD16viZoF0kKkvDcrZNYnhb)
+
+## 💡 核心功能
+
+### 🎤 语音交互
+- **离线语音唤醒** - 无需联网，保护隐私
+- **流式语音识别** - 边说边识别，响应迅速
+- **自然语音合成** - 拟人化语音回复
+
+### 🧠 AI 大模型
+- **多模型支持** - Qwen、DeepSeek、ChatGPT 等
+- **上下文记忆** - 持续对话，记住前文
+- **多语言支持** - 中文、英文、日文
+
+### 🔧 设备控制
+- **GPIO 控制** - 控制 LED、继电器等外设
+- **PWM 输出** - 调节灯光亮度、电机速度
+- **I2C/SPI 接口** - 连接各种传感器
+
+### 📱 连接方式
+- **Wi-Fi 连接** - 家庭网络直连
+- **4G 蜂窝网络** - 移动场景使用
+- **WebSocket/MQTT** - 稳定通信协议
+
+## 🎮 使用场景
+
+### 🏠 智能家居
+```
+你："小智，打开客厅灯"
+小智："好的，已为您打开客厅灯"
+```
+
+### 📚 学习助手
+```
+你："小智，什么是量子计算？"
+小智："量子计算是利用量子力学原理进行信息处理的计算方式..."
+```
+
+### 🎵 娱乐伙伴
+```
+你："小智，播放周杰伦的歌"
+小智："正在为您播放周杰伦的《晴天》"
+```
+
+### 🔍 信息查询
+```
+你："小智，今天北京天气如何？"
+小智："北京今天晴，气温 15-25°C，适合外出"
+```
+
+## 📝 开发者资源
+
+### 📖 文档指南
+- [📋 自定义开发板指南](docs/custom-board.md) - 如何适配新硬件
+- [🔌 MCP 协议使用指南](docs/mcp-usage.md) - 设备控制协议
+- [💬 通信协议详解](docs/websocket.md) - WebSocket/MQTT 协议
+- [⚙️ 分区表说明](partitions/v2/README.md) - 固件分区配置
+
+### 🛠️ 开发环境
+- **推荐 IDE**：VSCode + ESP-IDF 插件
+- **代码风格**：Google C++ Style Guide
+- **编译环境**：Linux > macOS > Windows
+- **调试工具**：串口监控、网络抓包
+
+### 🔧 高级配置
+- **自定义唤醒词** - 打造专属唤醒词
+- **个性化表情** - 自定义显示界面
+- **音频调优** - 适配不同麦克风
+- **网络配置** - 支持企业 WiFi
+
+## 🌐 生态项目
+
+### 🏗️ 服务端项目
+- [Python 服务端](https://github.com/xinnan-tech/xiaozhi-esp32-server) - 功能完整，易于扩展
+- [Java 服务端](https://github.com/joey-zhou/xiaozhi-esp32-server-java) - 企业级应用
+- [Go 服务端](https://github.com/AnimeAIChat/xiaozhi-server-go) - 高性能方案
+
+### 📱 客户端项目
+- [Python 客户端](https://github.com/huangjunsen0406/py-xiaozhi) - 桌面应用
+- [Android 客户端](https://github.com/TOM88812/xiaozhi-android-client) - 移动端
+- [Linux 客户端](http://github.com/100askTeam/xiaozhi-linux) - 嵌入式 Linux
+
+## 🤝 参与贡献
+
+### 🐛 问题反馈
+- 📧 提交 [GitHub Issue](https://github.com/78/xiaozhi-esp32/issues)
+- 💬 加入 QQ 群：1011329060
+- 📺 观看 [B站教程](https://www.bilibili.com/video/BV1XnmFYLEJN/)
+
+### 🔧 贡献代码
+1. Fork 项目仓库
+2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
+
+### 📄 开源协议
+本项目基于 [MIT 协议](LICENSE) 开源，您可以：
+- ✅ 自由使用 - 个人或商业用途
+- ✅ 修改源码 - 定制功能
+- ✅ 分发传播 - 分享给他人
+- ✅ 专利授权 - 无需担心专利问题
+
+## 🌟 Star 历史
+
+<a href="https://star-history.com/#78/xiaozhi-esp32&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
+ </picture>
+</a>
+
+---
+
+**如果本项目对你有帮助，请给个 ⭐️ Star 支持一下！**
+
+Made with ❤️ by [虾哥](https://github.com/78) and contributors
