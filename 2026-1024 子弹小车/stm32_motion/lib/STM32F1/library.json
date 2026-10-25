@@ -1,0 +1,6 @@
+{
+  "name": "STM32F1",
+  "version": "1.0.0",
+  "description": "参考工程的 ST 标准外设库与 CMSIS，仅保留本项目需要的部分",
+  "build": { "libArchive": false }
+}
