@@ -10,6 +10,11 @@
 #include <mutex>
 #include <deque>
 #include <memory>
+#include <atomic>
+#if CONFIG_CAR_WEB_REMOTE
+#include "car/remote_server.h"
+#include "car/remote_audio.h"
+#endif
 
 #include "protocol.h"
 #include "ota.h"
@@ -40,6 +45,7 @@
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
+#define MAIN_EVENT_REMOTE               (1 << 13)
 
 
 enum AecMode {
@@ -135,7 +141,7 @@ private:
 
     std::mutex mutex_;
     std::deque<std::function<void()>> main_tasks_;
-    std::unique_ptr<Protocol> protocol_;
+    std::shared_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
@@ -143,6 +149,36 @@ private:
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
+#if CONFIG_CAR_WEB_REMOTE
+    TaskHandle_t remote_sender_task_ = nullptr;
+    std::atomic<bool> remote_sender_busy_{false};
+    std::atomic<bool> remote_sender_failed_{false};
+    std::shared_ptr<Protocol> remote_sender_protocol_;
+    std::unique_ptr<AudioStreamPacket> remote_sender_packet_;
+    uint32_t remote_sender_epoch_ = 0;
+    uint32_t remote_sender_session_ = 0;
+    uint32_t remote_audio_session_ = 0;
+    void StartRemoteSender();
+    void KickRemoteSender();
+    std::mutex remote_mutex_;
+    std::deque<RemoteEvent> remote_events_;
+    std::atomic<bool> remote_enabled_{false};
+    std::atomic<bool> remote_reply_allowed_{false};
+    std::atomic<bool> remote_resetting_{false};
+    std::atomic<uint32_t> remote_generation_{1};
+    std::atomic<uint32_t> remote_owner_{0};
+    std::atomic<bool> remote_releasing_{false};
+    uint32_t remote_recording_id_ = 0;
+    std::atomic<bool> remote_recording_{false};
+    bool remote_ending_ = false;
+    std::atomic<bool> remote_platform_ready_{false};
+    RemoteEvent remote_end_event_;
+    RemoteAudio remote_audio_;
+    bool PostRemoteEvent(RemoteEvent&& event);
+    void HandleRemoteEvents();
+    void ResetRemoteSession();
+    void FinishRemoteAudio();
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     SerialConsole serial_console_;
     CarReply serial_reply_;

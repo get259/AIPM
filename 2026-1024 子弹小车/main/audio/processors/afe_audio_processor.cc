@@ -100,6 +100,7 @@ void AfeAudioProcessor::Start() {
 }
 
 void AfeAudioProcessor::Stop() {
+    ++processing_generation_;
     xEventGroupClearBits(event_group_, PROCESSOR_RUNNING);
     if (afe_data_ != nullptr) {
         afe_iface_->reset_buffer(afe_data_);
@@ -119,6 +120,7 @@ void AfeAudioProcessor::OnVadStateChange(std::function<void(bool speaking)> call
 }
 
 void AfeAudioProcessor::AudioProcessorTask() {
+    uint32_t buffered_generation = processing_generation_.load();
     auto fetch_size = afe_iface_->get_fetch_chunksize(afe_data_);
     auto feed_size = afe_iface_->get_feed_chunksize(afe_data_);
     ESP_LOGI(TAG, "Audio communication task started, feed size: %d fetch size: %d",
@@ -127,8 +129,16 @@ void AfeAudioProcessor::AudioProcessorTask() {
     while (true) {
         xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, portMAX_DELAY);
 
+        const uint32_t generation = processing_generation_.load();
+        if (generation != buffered_generation) {
+            // 在处理任务自身清理拼帧缓存，避免 Stop 与输出任务并发修改 vector。
+            output_buffer_.clear();
+            is_speaking_ = false;
+            buffered_generation = generation;
+        }
+
         auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
-        if ((xEventGroupGetBits(event_group_) & PROCESSOR_RUNNING) == 0) {
+        if (generation != processing_generation_.load() || (xEventGroupGetBits(event_group_) & PROCESSOR_RUNNING) == 0) {
             continue;
         }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
@@ -157,6 +167,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
             
             // Output complete frames when buffer has enough data
             while (output_buffer_.size() >= frame_samples_) {
+                if (generation != processing_generation_.load()) break;
                 if (output_buffer_.size() == frame_samples_) {
                     // If buffer size equals frame size, move the entire buffer
                     output_callback_(std::move(output_buffer_));

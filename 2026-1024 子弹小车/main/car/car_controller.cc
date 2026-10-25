@@ -81,7 +81,20 @@ bool CarController::FinishReply(bool complete) {
     return current_stop;
 }
 
-void CarController::ApplyState(uint8_t state) {
+void CarController::ApplyState(uint8_t state, bool manual) {
+    // 网络控制与 AI 输出共用短临界区；手动操作屏蔽旧回复，下一句 STT 才解除。
+    std::lock_guard<std::mutex> lock(output_mutex_);
+    ApplyStateLocked(state, manual);
+}
+
+void CarController::FireRemote() {
+    std::lock_guard<std::mutex> lock(output_mutex_);
+    ApplyStateLocked((state_ & 0x0f) | ActionBits::Fire, true);
+}
+
+void CarController::ApplyStateLocked(uint8_t state, bool manual) {
+    if (manual) manual_override_ = true;
+    else if (manual_override_) return;
     state_ = state & ActionBits::All;
 #if CONFIG_CAR_CONTROL
     if (led_ready_) {

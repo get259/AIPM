@@ -5,6 +5,7 @@
 #include "protocol.h"
 
 #include <web_socket.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 
@@ -25,6 +26,7 @@ private:
     EventGroupHandle_t event_group_handle_;
     std::unique_ptr<WebSocket> websocket_;
     int version_ = 1;
+    std::atomic<uint32_t> channel_generation_{0};
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

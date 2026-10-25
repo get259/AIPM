@@ -176,6 +176,11 @@ void Application::Initialize() {
 
     // Start network asynchronously
     board.StartNetwork();
+#if CONFIG_CAR_WEB_REMOTE
+    StartRemoteSender();
+    if (!RemoteServer::Get().Start([this](RemoteEvent&& event) { return PostRemoteEvent(std::move(event)); }))
+        ESP_LOGE(TAG, "HTTPS remote server failed to start");
+#endif
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
@@ -195,7 +200,7 @@ void Application::Run() {
         MAIN_EVENT_START_LISTENING |
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED;
+        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_REMOTE;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -239,14 +244,39 @@ void Application::Run() {
             HandleStopListeningEvent();
         }
 
-        if (bits & MAIN_EVENT_SEND_AUDIO) {
-            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-#if CONFIG_SERIAL_TEXT_CHAT
-                // 文字测试期间丢弃任何残留音频，不上传麦克风数据。
-                continue;
+#if CONFIG_CAR_WEB_REMOTE
+        if (bits & MAIN_EVENT_REMOTE) HandleRemoteEvents();
 #endif
-                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
-                    break;
+        if (bits & MAIN_EVENT_SEND_AUDIO) {
+#if CONFIG_CAR_WEB_REMOTE
+            if (audio_service_.HasUplinkError()) {
+                if (remote_enabled_) ResetRemoteSession();
+                else {
+                    audio_service_.EnableVoiceProcessing(false);
+                    audio_service_.SetExternalInput(false);
+                    car_.DiscardReply();
+                    if (protocol_) protocol_->CloseAudioChannel();
+                    SetDeviceState(kDeviceStateIdle);
+                }
+            }
+#endif
+#if CONFIG_CAR_WEB_REMOTE
+            if (remote_enabled_) {
+                if (!remote_sender_busy_ && remote_sender_failed_.exchange(false) &&
+                    remote_sender_session_ == remote_audio_session_) {
+                    ESP_LOGW(TAG, "Remote cloud audio send failed; cancelling input session");
+                    ResetRemoteSession();
+                }
+                KickRemoteSender();
+                FinishRemoteAudio();
+            } else
+#endif
+            {
+                while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+#if CONFIG_SERIAL_TEXT_CHAT
+                    continue;
+#endif
+                    if (protocol_ && !protocol_->SendAudio(std::move(packet))) break;
                 }
             }
         }
@@ -313,6 +343,9 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) ResetRemoteSession();
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     serial_network_ready_ = false;
     FinishSerialText("网络断开，本轮结束");
@@ -347,8 +380,16 @@ void Application::HandleActivationDoneEvent() {
     serial_platform_ready_ = activation_ready;
     printf("[串口测试] %s\n", activation_ready ? "平台配置就绪，请发送一行文字" : "尚未完成激活，请先绑定设备");
 #endif
+#if CONFIG_CAR_WEB_REMOTE
+    remote_platform_ready_ = activation_ready;
+#endif
+#if CONFIG_CAR_WEB_REMOTE
+    const char* ready_message = "设备已激活，可打开网页遥控器";
+#else
+    const char* ready_message = "设备已激活，热点即将关闭";
+#endif
     Board::GetInstance().UpdateActivationStatus(activation_ready ? "ready" : "error", "",
-        activation_ready ? "设备已激活，热点即将关闭" : "暂未取得平台连接配置，请查看设备提示");
+        activation_ready ? ready_message : "暂未取得平台连接配置，请查看设备提示");
 
     auto display = Board::GetInstance().GetDisplay();
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
@@ -576,8 +617,20 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
+#if CONFIG_CAR_WEB_REMOTE
+        if (remote_resetting_) return;
+        const uint32_t generation = remote_generation_.load();
+#endif
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
-        Schedule([this]() {
+        Schedule([this
+#if CONFIG_CAR_WEB_REMOTE
+            , generation
+#endif
+        ]() {
+#if CONFIG_CAR_WEB_REMOTE
+            if (generation != remote_generation_.load()) return;
+            if (remote_enabled_) { ResetRemoteSession(); return; }
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
             FinishSerialText("会话关闭，本轮结束");
 #endif
@@ -591,9 +644,23 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
+#if CONFIG_CAR_WEB_REMOTE
+        const uint32_t generation = remote_generation_.load();
+        auto schedule = [this, generation](std::function<void()>&& task) {
+            Schedule([this, generation, task = std::move(task)]() {
+                if (generation == remote_generation_.load()) task();
+            });
+        };
+#else
+        auto schedule = [this](std::function<void()>&& task) { Schedule(std::move(task)); };
+#endif
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (!cJSON_IsString(type)) return;
+#if CONFIG_CAR_WEB_REMOTE
+        if (remote_enabled_ && !remote_reply_allowed_ &&
+            (strcmp(type->valuestring, "tts") == 0 || strcmp(type->valuestring, "stt") == 0)) return;
+#endif
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) return;
@@ -603,7 +670,7 @@ void Application::InitializeProtocol() {
                 const auto text = cJSON_GetObjectItem(root, "text");
                 const auto session = cJSON_GetObjectItem(root, "session_id");
                 const auto aborted = cJSON_GetObjectItem(root, "is_aborted");
-                Schedule([this, reply_state = std::string(state->valuestring),
+                schedule([this, reply_state = std::string(state->valuestring),
                           reply_text = std::string(cJSON_IsString(text) ? text->valuestring : ""),
                           reply_session = std::string(cJSON_IsString(session) ? session->valuestring : ""),
                           has_session = session != nullptr,
@@ -620,7 +687,7 @@ void Application::InitializeProtocol() {
                  protocol_->session_id() == session->valuestring));
 #endif
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this
+                schedule([this
 #if CONFIG_CAR_CONTROL
                           , car_event
 #endif
@@ -645,7 +712,7 @@ void Application::InitializeProtocol() {
 #if CONFIG_CAR_CONTROL
                 const bool car_complete = cJSON_IsBool(is_aborted) && !is_aborted_bool;
 #endif
-                Schedule([this, is_aborted_bool
+                schedule([this, is_aborted_bool
 #if CONFIG_CAR_CONTROL
                           , car_event, car_complete
 #endif
@@ -680,7 +747,7 @@ void Application::InitializeProtocol() {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    Schedule([this, display, message = std::string(text->valuestring)
+                    schedule([this, display, message = std::string(text->valuestring)
 #if CONFIG_CAR_CONTROL
                               , car_event
 #endif
@@ -711,7 +778,7 @@ void Application::InitializeProtocol() {
                     (cJSON_IsString(session) && (protocol_->session_id().empty() ||
                      protocol_->session_id() == session->valuestring));
 #endif
-                Schedule([this, display, message = std::string(text->valuestring)
+                schedule([this, display, message = std::string(text->valuestring)
 #if CONFIG_CAR_CONTROL && CONFIG_CAR_AUTO_LISTEN && !CONFIG_CAR_REPLY_AUDIO && !CONFIG_SERIAL_TEXT_CHAT
                           , next_car_input
 #endif
@@ -726,7 +793,7 @@ void Application::InitializeProtocol() {
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
-                Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
+                schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
                     display->SetEmotion(emotion_str.c_str());
                 });
             }
@@ -741,7 +808,7 @@ void Application::InitializeProtocol() {
                 ESP_LOGI(TAG, "System command: %s", command->valuestring);
                 if (strcmp(command->valuestring, "reboot") == 0) {
                     // Do a reboot if user requests a OTA update
-                    Schedule([this]() {
+                    schedule([this]() {
                         Reboot();
                     });
                 } else {
@@ -762,7 +829,7 @@ void Application::InitializeProtocol() {
             auto payload = cJSON_GetObjectItem(root, "payload");
             ESP_LOGI(TAG, "Received custom message: %s", cJSON_PrintUnformatted(root));
             if (cJSON_IsObject(payload)) {
-                Schedule([this, display, payload_str = std::string(cJSON_PrintUnformatted(payload))]() {
+                schedule([this, display, payload_str = std::string(cJSON_PrintUnformatted(payload))]() {
                     display->SetChatMessage("system", payload_str.c_str());
                 });
             } else {
@@ -841,6 +908,9 @@ void Application::StopListening() {
 }
 
 void Application::HandleToggleChatEvent() {
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) return;
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     return;
 #endif
@@ -881,6 +951,9 @@ void Application::HandleToggleChatEvent() {
 }
 
 void Application::HandleStartListeningEvent() {
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) return;
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     return;
 #endif
@@ -916,6 +989,9 @@ void Application::HandleStartListeningEvent() {
 }
 
 void Application::HandleStopListeningEvent() {
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) return;
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     return;
 #endif
@@ -934,6 +1010,9 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) return;
+#endif
 #if CONFIG_SERIAL_TEXT_CHAT
     return;
 #endif
@@ -997,6 +1076,14 @@ void Application::HandleStateChangedEvent() {
     return;
 #endif
     
+#if CONFIG_CAR_WEB_REMOTE
+    if (remote_enabled_) {
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        display->SetStatus(remote_recording_ ? "网页录音中" : "网页独占遥控");
+        return;
+    }
+#endif
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:

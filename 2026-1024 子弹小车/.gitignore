@@ -6,6 +6,8 @@ build/
 platformio-build.log
 platformio-car-tests.log
 platformio-serial-build.log
+platformio-remote-build.log
+platformio-remote-tests.log
 sdkconfig.esp32s3
 sdkconfig.esp32s3.old
 .vscode/
@@ -19,7 +21,13 @@ main/assets/lang_config.h
 main/mmap_generate_emoji.h
 .DS_Store
 .cache
+# 本地根 CA、服务器私钥和公开证书由工具生成，不进入源码提交。
+.local-remote-tls/
 *.pyc
 *.bin
 mmap_generate_*.h
 .clangd
+
+# 本地诊断日志不随源码发布。
+build-remote-revision.log
+test-remote-revision.log

@@ -37,6 +37,7 @@ public:
     void SetLanguage(const std::string &&language);
     void SetLanguage(const std::string &language);
     void Start();
+    void SetStationManaged(bool managed);
     void Stop(bool keep_station = false);
     // 扩展的激活页只提供状态和激活码，不暴露 WiFi 密码或平台令牌。
     void SetActivationPortal(bool enabled);
@@ -69,6 +70,7 @@ private:
     esp_event_handler_instance_t instance_got_ip_;
     esp_timer_handle_t scan_timer_ = nullptr;
     bool is_connecting_ = false;
+    std::atomic<bool> station_managed_{false};
     esp_netif_t* ap_netif_ = nullptr;
     std::vector<wifi_ap_record_t> ap_records_;
 

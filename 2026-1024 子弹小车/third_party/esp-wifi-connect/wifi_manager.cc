@@ -157,7 +157,12 @@ void WifiManager::StartStation() {
 
     // 配网页只做过临时试连；先停用临时 STA，再让原 WifiStation
     // 创建 netif 并接收新的 STA_START/IP 事件，热点始终保持运行。
-    if (keep_ap) ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    if (keep_ap) {
+#if CONFIG_CAR_WEB_REMOTE
+        config_ap_->SetStationManaged(true);
+#endif
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    }
     station_->Start(keep_ap);
     station_active_ = true;
 }
@@ -234,6 +239,9 @@ void WifiManager::StartConfigAp() {
         return;
     }
     if (config_mode_active_) {
+#if CONFIG_CAR_WEB_REMOTE
+        if (!station_active_) config_ap_->SetStationManaged(false);
+#endif
         ESP_LOGW(TAG, "Config AP already active");
         return;
     }
@@ -272,6 +280,10 @@ void WifiManager::StartConfigAp() {
 }
 
 void WifiManager::StopConfigAp(uint32_t expected_generation) {
+#if CONFIG_CAR_WEB_REMOTE
+    // 遥控使用常开热点，旧网页 /exit 和激活延迟任务均不能关闭它。
+    return;
+#endif
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!config_mode_active_) {
@@ -295,6 +307,9 @@ void WifiManager::SetActivationStatus(const std::string& state, const std::strin
     if (!config_mode_active_ || !config_.activation_portal) return;
     config_ap_->SetActivationStatus(state, code, message);
     if (state != "ready" || portal_close_scheduled_) return;
+#if CONFIG_CAR_WEB_REMOTE
+    return;
+#endif
 
     struct CloseRequest { WifiManager* manager; uint32_t generation; };
     auto* request = new (std::nothrow) CloseRequest{this, portal_generation_};
@@ -315,6 +330,10 @@ void WifiManager::SetActivationStatus(const std::string& state, const std::strin
 
 bool WifiManager::IsConfigMode() const {
     std::lock_guard<std::mutex> lock(mutex_);
+#if CONFIG_CAR_WEB_REMOTE
+    // 常开 AP 不代表正在配网，已有 STA 时允许平台及语音正常启动。
+    return config_mode_active_ && !station_active_;
+#endif
     return config_mode_active_;
 }
 

@@ -57,6 +57,7 @@ bool MqttProtocol::Start() {
 }
 
 bool MqttProtocol::StartMqttClient(bool report_error) {
+    const uint32_t generation = ++client_generation_;
     if (mqtt_ != nullptr) {
         ESP_LOGW(TAG, "Mqtt client already started");
         mqtt_.reset();
@@ -82,7 +83,8 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
     mqtt_ = network->CreateMqtt(0);
     mqtt_->SetKeepAlive(keepalive_interval);
 
-    mqtt_->OnDisconnected([this]() {
+    mqtt_->OnDisconnected([this, generation]() {
+        if (generation != client_generation_.load()) return;
         if (on_disconnected_ != nullptr) {
             on_disconnected_();
         }
@@ -90,14 +92,16 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
         esp_timer_start_once(reconnect_timer_, MQTT_RECONNECT_INTERVAL_MS * 1000);
     });
 
-    mqtt_->OnConnected([this]() {
+    mqtt_->OnConnected([this, generation]() {
+        if (generation != client_generation_.load()) return;
         if (on_connected_ != nullptr) {
             on_connected_();
         }
         esp_timer_stop(reconnect_timer_);
     });
 
-    mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
+    mqtt_->OnMessage([this, generation](const std::string& topic, const std::string& payload) {
+        if (generation != client_generation_.load()) return;
         cJSON* root = cJSON_Parse(payload.c_str());
         if (root == nullptr) {
             ESP_LOGE(TAG, "Failed to parse json message %s", payload.c_str());
@@ -117,13 +121,23 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
             ESP_LOGI(TAG, "Received goodbye message, session_id: %s", session_id ? session_id->valuestring : "null");
             if (session_id == nullptr || session_id_ == session_id->valuestring) {
                 auto alive = alive_;  // Capture alive flag
-                Application::GetInstance().Schedule([this, alive]() {
-                    if (*alive) {
+                Application::GetInstance().Schedule([this, alive, generation]() {
+                    if (*alive && generation == client_generation_.load()) {
                         CloseAudioChannel();
                     }
                 });
             }
         } else if (on_incoming_json_ != nullptr) {
+#if CONFIG_CAR_WEB_REMOTE
+            // MQTT 回复主题跨连接复用，动作相关事件必须有当前会话标识。
+            if (strcmp(type->valuestring, "tts") == 0 || strcmp(type->valuestring, "stt") == 0) {
+                auto session = cJSON_GetObjectItem(root, "session_id");
+                if (!cJSON_IsString(session) || session_id_.empty() || session_id_ != session->valuestring) {
+                    cJSON_Delete(root);
+                    return;
+                }
+            }
+#endif
             on_incoming_json_(root);
         }
         cJSON_Delete(root);
@@ -189,6 +203,8 @@ bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
 }
 
 void MqttProtocol::CloseAudioChannel() {
+    std::lock_guard<std::recursive_mutex> transport_lock(audio_transport_mutex_);
+    ++audio_epoch_;
     {
         std::lock_guard<std::mutex> lock(channel_mutex_);
         udp_.reset();
@@ -205,7 +221,20 @@ void MqttProtocol::CloseAudioChannel() {
     }
 }
 
+void MqttProtocol::ResetInputSession() {
+    std::lock_guard<std::recursive_mutex> transport_lock(audio_transport_mutex_);
+    ++audio_epoch_;
+    if (mqtt_ && mqtt_->IsConnected() && !session_id_.empty()) CloseAudioChannel();
+    else { std::lock_guard<std::mutex> lock(channel_mutex_); udp_.reset(); }
+    ++client_generation_;
+    mqtt_.reset();
+    session_id_.clear();
+    esp_timer_stop(reconnect_timer_);
+}
+
 bool MqttProtocol::OpenAudioChannel() {
+    std::lock_guard<std::recursive_mutex> transport_lock(audio_transport_mutex_);
+    ++audio_epoch_;
     if (mqtt_ == nullptr || !mqtt_->IsConnected()) {
         ESP_LOGI(TAG, "MQTT is not connected, try to connect now");
         if (!StartMqttClient(true)) {

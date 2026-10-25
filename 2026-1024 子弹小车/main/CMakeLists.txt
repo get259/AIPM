@@ -51,6 +51,9 @@ endif()
 if(CONFIG_CAR_CONTROL)
     list(APPEND SOURCES "car/car_controller.cc")
 endif()
+if(CONFIG_CAR_WEB_REMOTE)
+    list(APPEND SOURCES "car/remote_server.cc" "car/remote_application.cc" "car/remote_sender.cc")
+endif()
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
@@ -735,6 +738,34 @@ idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     )
+
+# 证书只从被忽略的本机目录嵌入，根 CA 私钥不参与构建。
+if(CONFIG_CAR_WEB_REMOTE)
+    set(REMOTE_PAGE_DIR "${CMAKE_BINARY_DIR}/web-remote-assets")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PROJECT_DIR}/scripts/build_remote_page.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/car/web/remote.html"
+        "${CMAKE_CURRENT_SOURCE_DIR}/car/web/remote.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/car/web/capture.js")
+    execute_process(COMMAND "${PYTHON}" "${PROJECT_DIR}/scripts/build_remote_page.py"
+        --output "${REMOTE_PAGE_DIR}" RESULT_VARIABLE REMOTE_PAGE_RESULT)
+    if(NOT REMOTE_PAGE_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to build bundled remote page")
+    endif()
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${REMOTE_PAGE_DIR}")
+    target_add_binary_data(${COMPONENT_LIB} "${REMOTE_PAGE_DIR}/remote_page.html" TEXT)
+    target_add_binary_data(${COMPONENT_LIB} "${REMOTE_PAGE_DIR}/remote_page.html.gz" BINARY)
+    foreach(asset capture.js)
+        target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/car/web/${asset}" TEXT)
+    endforeach()
+    foreach(asset server-cert.pem server-key.pem root-ca.crt)
+        if(NOT EXISTS "${PROJECT_DIR}/.local-remote-tls/${asset}")
+            message(FATAL_ERROR "Missing local HTTPS certificate: run scripts/remote_certificates.py first")
+        endif()
+        target_add_binary_data(${COMPONENT_LIB} "${PROJECT_DIR}/.local-remote-tls/${asset}" TEXT)
+    endforeach()
+    target_add_binary_data(${COMPONENT_LIB} "${PROJECT_DIR}/.local-remote-tls/car-root-ca.cer" BINARY)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

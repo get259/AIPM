@@ -42,8 +42,10 @@
     const copyButton = document.getElementById('copy-code');
     let activationStarted = false;
     let finished = false;
+    let alwaysOn = false;
 
     async function exitConfig() {
+        if (alwaysOn) return;
         try { await fetch('/exit', { method: 'POST', cache: 'no-store' }); }
         catch (_) { /* 热点自动关闭时，请求可能因连接断开而结束。 */ }
     }
@@ -54,6 +56,7 @@
             const response = await fetch('/activation/status', { cache: 'no-store' });
             if (!response.ok) throw new Error('status');
             const data = await response.json();
+            alwaysOn = data.always_on === true;
             if (data.enabled === false) {
                 finished = true;
                 statusLabel.textContent = '配置成功！';
@@ -72,7 +75,7 @@
             if (data.state === 'ready') {
                 finished = true;
                 statusLabel.textContent = '设备绑定成功';
-                hintLabel.textContent = '热点即将关闭，设备将继续使用已配置的 Wi-Fi。';
+                hintLabel.textContent = alwaysOn ? '热点持续开启。' : '热点即将关闭，设备将继续使用已配置的 Wi-Fi。';
                 setTimeout(exitConfig, 1500);
                 return;
             }
@@ -112,5 +115,6 @@
     });
     window.addEventListener('load', pollActivation);
 </script>
+
 </body>
 </html>

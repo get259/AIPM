@@ -76,10 +76,18 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
+    std::lock_guard<std::recursive_mutex> transport_lock(audio_transport_mutex_);
+    ++audio_epoch_;
+    ++channel_generation_;
+    const bool existed = websocket_ != nullptr;
     websocket_.reset();
+    session_id_.clear();
+    if (existed && on_audio_channel_closed_) on_audio_channel_closed_();
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+    std::lock_guard<std::recursive_mutex> transport_lock(audio_transport_mutex_);
+    ++audio_epoch_;
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
@@ -89,6 +97,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    const uint32_t generation = ++channel_generation_;
+    session_id_.clear();
+    xEventGroupClearBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
 
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
@@ -108,7 +119,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
-    websocket_->OnData([this](const char* data, size_t len, bool binary) {
+    websocket_->OnData([this, generation](const char* data, size_t len, bool binary) {
+        if (generation != channel_generation_.load()) return;
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
                 if (version_ == 2) {
@@ -164,7 +176,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    websocket_->OnDisconnected([this]() {
+    websocket_->OnDisconnected([this, generation]() {
+        if (generation != channel_generation_.load()) return;
         ESP_LOGI(TAG, "Websocket disconnected");
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_();

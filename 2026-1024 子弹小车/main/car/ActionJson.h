@@ -8,7 +8,7 @@ constexpr uint8_t Forward = 0x01;    // bit 0：前进。
 constexpr uint8_t Backward = 0x02;   // bit 1：后退。
 constexpr uint8_t TurnLeft = 0x04;   // bit 2：左转。
 constexpr uint8_t TurnRight = 0x08;  // bit 3：右转。
-constexpr uint8_t Fire = 0x10;       // bit 4：ESP32 本地 LED。
+constexpr uint8_t Fire = 0x10;       // bit 4：STM32 单次蓄力重炮，同时兼容 ESP32 本地 LED。
 constexpr uint8_t All = 0x1F;        // bit 5～7 预留为 0。
 }  // 动作状态位定义。
 

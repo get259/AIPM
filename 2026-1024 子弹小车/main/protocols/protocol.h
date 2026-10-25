@@ -8,6 +8,8 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <mutex>
+#include <atomic>
 
 struct AudioStreamPacket {
     int sample_rate = 0;
@@ -65,9 +67,18 @@ public:
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);
 
+    // 后台音频发送持有会话锁并核对代际，旧音频不能进入新连接。
+    uint32_t AudioEpoch() const { return audio_epoch_.load(); }
+    bool SendAudioForEpoch(std::unique_ptr<AudioStreamPacket> packet, uint32_t epoch) {
+        std::lock_guard<std::recursive_mutex> lock(audio_transport_mutex_);
+        if (epoch != audio_epoch_) return true;
+        return SendAudio(std::move(packet));
+    }
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
+    // 控制来源切换时建立新的输入会话边界，不改变认证及原异常重试策略。
+    virtual void ResetInputSession() { CloseAudioChannel(); }
     virtual bool IsAudioChannelOpened() const = 0;
     virtual bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
@@ -78,6 +89,8 @@ public:
     virtual void SendMcpMessage(const std::string& message);
 
 protected:
+    std::recursive_mutex audio_transport_mutex_;
+    std::atomic<uint32_t> audio_epoch_{0};
     std::function<void(const cJSON* root)> on_incoming_json_;
     std::function<void(std::unique_ptr<AudioStreamPacket> packet)> on_incoming_audio_;
     std::function<void()> on_audio_channel_opened_;

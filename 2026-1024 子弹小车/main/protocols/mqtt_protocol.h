@@ -32,6 +32,7 @@ public:
     bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;
     bool OpenAudioChannel() override;
     void CloseAudioChannel() override;
+    void ResetInputSession() override;
     bool IsAudioChannelOpened() const override;
 
 private:
@@ -44,6 +45,7 @@ private:
 
     std::mutex channel_mutex_;
     std::unique_ptr<Mqtt> mqtt_;
+    std::atomic<uint32_t> client_generation_{0};
     std::unique_ptr<Udp> udp_;
     mbedtls_aes_context aes_ctx_;
     std::string aes_nonce_;

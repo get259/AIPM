@@ -2,6 +2,7 @@
 #include <esp_log.h>
 #include <lwip/sockets.h>
 #include <lwip/netdb.h>
+#include "sdkconfig.h"
 
 #define TAG "DnsServer"
 
@@ -90,7 +91,19 @@ void DnsServer::Run() {
             break;
         }
 
-        // Simple DNS response: point all queries to 192.168.4.1
+        // 忽略短包与响应包，预留传统配网回复所需的 16 字节。
+        if (len < 12 || len > static_cast<int>(sizeof(buffer)) - 16 ||
+            (static_cast<unsigned char>(buffer[2]) & 0x80)) continue;
+#if CONFIG_CAR_WEB_REMOTE
+        // 常开遥控热点仅通过 IP 访问，不劫持手机后台网站的域名。
+        // 快速返回 NXDOMAIN，避免外站 HTTPS 被引向本机并反复握手失败。
+        buffer[2] = static_cast<char>((static_cast<unsigned char>(buffer[2]) & 0x79) | 0x80);
+        buffer[3] = 0x03;
+        buffer[6] = buffer[7] = buffer[8] = buffer[9] = 0;
+        sendto(fd_, buffer, len, 0, (struct sockaddr *)&client_addr, client_addr_len);
+        continue;
+#endif
+        // 普通配网模式仍将域名指向设备，以保留自动配网入口。
         buffer[2] |= 0x80;  // Set response flag
         buffer[3] |= 0x80;  // Set Recursion Available
         buffer[7] = 1;      // Set answer count to 1

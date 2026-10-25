@@ -69,7 +69,8 @@ enum AudioTaskType {
 struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
-    uint32_t timestamp;
+    uint32_t timestamp = 0;
+    uint32_t generation = 0;
 };
 
 struct DebugStatistics {
@@ -111,6 +112,12 @@ public:
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
 
+    // 切换音频来源会丢弃队列，并使正在编码的旧任务失效。
+    void SetExternalInput(bool external);
+    bool SubmitExternalPcm(std::vector<int16_t>&& pcm);
+    bool IsUplinkDrained();
+    bool HasUplinkError();
+
 private:
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;
@@ -138,6 +145,11 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    uint32_t input_generation_ = 1;
+    uint32_t encoder_generation_ = 1; // 仅由编码任务使用。
+    bool external_input_ = false;
+    bool encoding_active_ = false;
+    bool uplink_failed_ = false;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 

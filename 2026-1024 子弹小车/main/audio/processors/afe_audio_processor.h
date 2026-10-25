@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <atomic>
 
 #include "audio_processor.h"
 #include "audio_codec.h"
@@ -38,8 +39,9 @@ private:
     int frame_samples_ = 0;
     bool is_speaking_ = false;
     std::vector<int16_t> output_buffer_;
+    std::atomic<uint32_t> processing_generation_{0};
 
     void AudioProcessorTask();
 };
 
-#endif 
+#endif

@@ -360,6 +360,7 @@ void AudioService::OpusCodecTask() {
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
             auto task = std::move(audio_encode_queue_.front());
             audio_encode_queue_.pop_front();
+            encoding_active_ = true;
             audio_queue_cv_.notify_all();
             lock.unlock();
 
@@ -367,24 +368,33 @@ void AudioService::OpusCodecTask() {
             packet->frame_duration = OPUS_FRAME_DURATION_MS;
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
+            if (encoder_generation_ != task->generation) {
+                // 新来源/新录音不能沿用上一会话的 Opus 预测状态。
+                opus_encoder_->ResetState();
+                encoder_generation_ = task->generation;
+            }
             if (!opus_encoder_->Encode(std::move(task->pcm), packet->payload)) {
                 ESP_LOGE(TAG, "Failed to encode audio");
+                lock.lock();
+                encoding_active_ = false;
+                if (task->generation == input_generation_) uplink_failed_ = true;
+                audio_queue_cv_.notify_all();
+                if (callbacks_.on_send_queue_available) callbacks_.on_send_queue_available();
                 continue;
             }
 
+            // 原子发布：排空检查不能在“编码完成”和“发送包入队”之间穿过。
+            lock.lock();
+            encoding_active_ = false;
+            if (task->generation != input_generation_) continue;
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
-                {
-                    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-                    audio_send_queue_.push_back(std::move(packet));
-                }
-                if (callbacks_.on_send_queue_available) {
-                    callbacks_.on_send_queue_available();
-                }
+                audio_send_queue_.push_back(std::move(packet));
             } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
-                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
                 audio_testing_queue_.push_back(std::move(packet));
             }
             debug_statistics_.encode_count++;
+            lock.unlock();
+            if (callbacks_.on_send_queue_available) callbacks_.on_send_queue_available();
             lock.lock();
         }
     }
@@ -414,6 +424,8 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
     
     /* Push the task to the encode queue */
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    if (type == kAudioTaskTypeEncodeToSendQueue && (external_input_ || !IsAudioProcessorRunning())) return;
+    const uint32_t generation = input_generation_;
 
     /* If the task is to send queue, we need to set the timestamp */
     if (type == kAudioTaskTypeEncodeToSendQueue && !timestamp_queue_.empty()) {
@@ -425,9 +437,54 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
         timestamp_queue_.pop_front();
     }
 
-    audio_queue_cv_.wait(lock, [this]() { return audio_encode_queue_.size() < MAX_ENCODE_TASKS_IN_QUEUE; });
+    // AFE 消费任务不能等待网络反压，否则 feed 环形缓冲会持续溢出。
+#if CONFIG_CAR_WEB_REMOTE
+    if (type == kAudioTaskTypeEncodeToSendQueue) {
+        if (uplink_failed_) return;
+        if (audio_encode_queue_.size() >= MAX_ENCODE_TASKS_IN_QUEUE) {
+            uplink_failed_ = true;
+            lock.unlock();
+            ESP_LOGW(TAG, "Audio uplink congested; cancelling input instead of blocking AFE fetch");
+            if (callbacks_.on_send_queue_available) callbacks_.on_send_queue_available();
+            return;
+        }
+    } else
+#endif
+    audio_queue_cv_.wait(lock, [this, generation]() { return service_stopped_ || generation != input_generation_ || audio_encode_queue_.size() < MAX_ENCODE_TASKS_IN_QUEUE; });
+    if (service_stopped_) return;
+    if (generation != input_generation_) return;
+    task->generation = generation;
     audio_encode_queue_.push_back(std::move(task));
     audio_queue_cv_.notify_all();
+}
+
+void AudioService::SetExternalInput(bool external) {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    external_input_ = external;
+    ++input_generation_;
+    uplink_failed_ = false;
+    audio_encode_queue_.clear();
+    audio_send_queue_.clear();
+    timestamp_queue_.clear();
+    audio_queue_cv_.notify_all();
+}
+
+bool AudioService::SubmitExternalPcm(std::vector<int16_t>&& pcm) {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    // 手机上传允许三帧在途；八帧有界编码队列吸收批量到达，最大 PCM 约 15 KB。
+    if (uplink_failed_ || !external_input_ || pcm.size() != 960 || audio_encode_queue_.size() >= 8u) return false;
+    auto task = std::make_unique<AudioTask>();
+    task->type = kAudioTaskTypeEncodeToSendQueue;
+    task->generation = input_generation_;
+    task->pcm = std::move(pcm);
+    audio_encode_queue_.push_back(std::move(task));
+    audio_queue_cv_.notify_all();
+    return true;
+}
+
+bool AudioService::IsUplinkDrained() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return !encoding_active_ && audio_encode_queue_.empty() && audio_send_queue_.empty();
 }
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
@@ -505,6 +562,8 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 void AudioService::EnableVoiceProcessing(bool enable) {
     ESP_LOGW(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
     if (enable) {
+        // 新一轮本地输入清理故障与旧队列，不能跨会话拼接音频。
+        SetExternalInput(false);
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
             audio_processor_initialized_ = true;
@@ -718,4 +777,9 @@ bool AudioService::IsAfeWakeWord() {
 #else
     return false;
 #endif
+}
+
+bool AudioService::HasUplinkError() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return uplink_failed_;
 }

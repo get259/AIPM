@@ -9,6 +9,17 @@ config SERIAL_TEXT_CHAT
         测试模式停用麦克风上传、唤醒与小车动作输出，回复显示在串口。
         支持已配置的 UART 控制台及 USB Serial/JTAG 控制台。
 
+config CAR_WEB_REMOTE
+    bool "Enable HTTPS car remote and always-on hotspot"
+    default n
+    depends on CAR_CONTROL && !SERIAL_TEXT_CHAT && USE_HOTSPOT_WIFI_PROVISIONING
+    select HTTPD_WS_SUPPORT
+    select ESP_HTTPS_SERVER_ENABLE
+    select WIFI_ACTIVATION_PORTAL
+    help
+        Browser control with exclusive microphone ownership. Generate local
+        certificates with scripts/remote_certificates.py before building.
+
 menuconfig CAR_CONTROL
     bool "Enable car JSON control"
     depends on IDF_TARGET_ESP32S3

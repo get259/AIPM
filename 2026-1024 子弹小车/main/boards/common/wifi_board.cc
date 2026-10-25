@@ -87,6 +87,10 @@ void WifiBoard::StartNetwork() {
     });
 
     // Try to connect or enter config mode
+#if CONFIG_CAR_WEB_REMOTE
+    // 先开热点，再沿用原有已保存 Wi-Fi 的连接流程。
+    wifi_manager.StartConfigAp();
+#endif
     TryWifiConnect();
 }
 

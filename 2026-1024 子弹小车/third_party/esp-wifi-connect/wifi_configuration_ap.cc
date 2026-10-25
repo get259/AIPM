@@ -54,6 +54,16 @@ WifiConfigurationAp::~WifiConfigurationAp()
     }
 }
 
+void WifiConfigurationAp::SetStationManaged(bool managed) {
+    station_managed_ = managed;
+    if (scan_timer_) esp_timer_stop(scan_timer_);
+    if (!managed) {
+        activation_started_ = false;
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        esp_wifi_scan_start(nullptr, false);
+    }
+}
+
 void WifiConfigurationAp::SetActivationPortal(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     activation_portal_ = enabled;
@@ -67,6 +77,9 @@ void WifiConfigurationAp::SetActivationPortal(bool enabled) {
 void WifiConfigurationAp::SetActivationStatus(const std::string& state, const std::string& code, const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     activation_state_ = state;
+#if CONFIG_CAR_WEB_REMOTE
+    if (state != "idle") activation_started_ = true;
+#endif
     activation_code_ = code.substr(0, 64);
     activation_message_ = message.substr(0, 1024);
 }
@@ -76,6 +89,9 @@ std::string WifiConfigurationAp::GetActivationStatusJson() {
     auto* root = cJSON_CreateObject();
     if (!root) return "{}";
     cJSON_AddBoolToObject(root, "enabled", activation_portal_);
+#if CONFIG_CAR_WEB_REMOTE
+    cJSON_AddBoolToObject(root, "always_on", true);
+#endif
     cJSON_AddStringToObject(root, "state", activation_state_.c_str());
     cJSON_AddStringToObject(root, "code", activation_code_.c_str());
     cJSON_AddStringToObject(root, "message", activation_message_.c_str());
@@ -133,7 +149,7 @@ void WifiConfigurationAp::Start()
     esp_timer_create_args_t timer_args = {
         .callback = [](void* arg) {
             auto* self = static_cast<WifiConfigurationAp*>(arg);
-            if (!self->is_connecting_) {
+            if (!self->is_connecting_ && !self->station_managed_) {
                 esp_wifi_scan_start(nullptr, false);
             }
         },
@@ -257,12 +273,18 @@ void WifiConfigurationAp::StartWebServer()
 {
     // Start the web server
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 28;
+#if CONFIG_CAR_WEB_REMOTE
+    config.max_open_sockets = 3;
+    config.lru_purge_enable = true;
+#endif
     config.uri_match_fn = httpd_uri_match_wildcard;
     // 5G Network takes longer to connect
     config.recv_wait_timeout = 15;
     config.send_wait_timeout = 15;
     ESP_ERROR_CHECK(httpd_start(&server_, &config));
+
+
 
     // Register the index.html file
     httpd_uri_t index_html = {
@@ -860,7 +882,7 @@ void WifiConfigurationAp::WifiEventHandler(void* arg, esp_event_base_t event_bas
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupSetBits(self->event_group_, WIFI_FAIL_BIT);
     } else if (event_id == WIFI_EVENT_SCAN_DONE) {
-        if (self->activation_started_) return;
+        if (self->activation_started_ || self->station_managed_) return;
         std::lock_guard<std::mutex> lock(self->mutex_);
         uint16_t ap_num = 0;
         esp_wifi_scan_get_ap_num(&ap_num);
