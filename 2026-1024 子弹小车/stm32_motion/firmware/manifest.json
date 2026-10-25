@@ -1,0 +1,95 @@
+{
+  "release": "2026-10-25-stm32-fire",
+  "chip": "STM32F103C8",
+  "flash_address": "0x08000000",
+  "source_baseline_commit": "f1a0cf3",
+  "source_snapshot_sha256": {
+    ".gitignore": "6e6e41d298aa1281b023735ea427f6e0ac12329b6f9bd1cbec68a979aeab5818",
+    "README.md": "82ad8f22826b7e2b76a767f47cdfca848dd70ba85e9bc3ee2ce49e9e1698ed67",
+    "docs/design.md": "2f7c8ae7023bd655dcb39df0751aa8a5d27adfdff45b3cc6097c862466d18e88",
+    "docs/implementation-plan.md": "83e312e8e5b02a36b37d3220a3fda6b146996282eea4882ebfc57968af5ac299",
+    "include/car_config.h": "320938f07353d4f39e72e0e046eae90cf59b1d72ab95e39927343d6f586267e8",
+    "include/car_fire.h": "e513f70c4cd3c0dbd88ba386515b25c03cf212e94e6e085fc83053a631558246",
+    "include/car_motion.h": "d3c6c26c4d9bd306c24f09565e71cb7715f0d7ca7856f1e29422828e7888522b",
+    "include/car_protocol.h": "5c3c71a967e3b2974ac71c7e4696fdf6d0fbcd23abc27831ac7efaac53b9e8ce",
+    "include/car_uart.h": "248f361a66f4c081c13873ae431a7a7b5a13d289a6ee5dadec89fd8bb1b55b4a",
+    "include/fire_led.h": "661f8dc7a5f5bce82f1a766752eeda772501765cebf93c4a30a7f80413475aa5",
+    "include/motor.h": "2dff5e375dc8e563d721980bdfe275ae9e5a3293ea4a42678b5377f36d20d354",
+    "include/stm32f10x_conf.h": "573745ea7aeb4dc994cec9d8fded67a12f87bf3acb6089a12f7eb7063753771e",
+    "lib/STM32F1/include/core_cm3.h": "de4668aa9d314d05769dfb29f028e205b50577c6b2150fc6bccb34bd34179bbb",
+    "lib/STM32F1/include/misc.h": "40c918f726035dfa67a7bfadefac8e922196d7918f915a7f2db1e652625c7e41",
+    "lib/STM32F1/include/stm32f10x.h": "4ee722d262c1e7d7505d7dc7eeb8ccaaf67158b51ee4bc177397cd64e74e1b3a",
+    "lib/STM32F1/include/stm32f10x_gpio.h": "ef945fe7b2e4a8f3bf8fa22d44274085444dec80424f91606a1467ea4e69626f",
+    "lib/STM32F1/include/stm32f10x_rcc.h": "894e140a70b0cdc94e4e96c5011def9dca5a103752783c3bb7cab538fc426f9e",
+    "lib/STM32F1/include/stm32f10x_tim.h": "dddf89f9b7134a2f15ed9cc2521589ee9a2e18c0553a6017c71b5d5b394524e5",
+    "lib/STM32F1/include/stm32f10x_usart.h": "9d4c2067e54defd64b000076e6561726d758c872d354bed6eea66a6767c08bce",
+    "lib/STM32F1/include/system_stm32f10x.h": "919dc1f5c6bbba74cb712e8ec7cf73f1988eafa9438c706526fb401a2ab4672d",
+    "lib/STM32F1/library.json": "871791b24505f29067d4e2d70d010b13293b7efdbbe89b9a1e998d239164368b",
+    "lib/STM32F1/src/misc.c": "152c632e56151b2564121c56ff359d0f041621f0da6ed101d7fd376a139a5c75",
+    "lib/STM32F1/src/stm32f10x_gpio.c": "8255650b583b2bab2c320e0974309a6ccf26f661e7ad1b54282c0f0e2b9a1acf",
+    "lib/STM32F1/src/stm32f10x_rcc.c": "f23bbc9b83e44e69f5dc34f072867f0087a3eb0452034ab09c363088d2354cd9",
+    "lib/STM32F1/src/stm32f10x_tim.c": "bd12bf18b03b8585ac2ba6bd0e80ec39d8fd0c89307eb54f5a7be38a46894d03",
+    "lib/STM32F1/src/stm32f10x_usart.c": "6d7af47017b01eb260fb7699f5c483e0a8576b4c780069a99975b7c6443030dd",
+    "lib/STM32F1/src/system_stm32f10x.c": "45f52950f5fc6509920fb26d1362e8457907c2d62fa455cbe3c6ce6daa974a76",
+    "platformio.ini": "fe5f550a5ba54c574e7c361612c96cbc403ac9a0e9e7803851a457e147ccddaa",
+    "scripts/build.py": "d0376ae18915f0c4a30328f98c5b8e25869abde6a0fee9f2dae73743e8504c6a",
+    "scripts/stm32f103c8.ld": "00194194289862a5d34ce14037d8bc0294d7ef4203c3257409c1917eb4b9e60f",
+    "src/car_fire.c": "7b98cb11004a9a696bb6fc4678359d4eea417b6315786025dc5bcd8c2a7d8061",
+    "src/car_motion.c": "5b53d1cf0c2c6e97fa1a6f91e2ae7796232eb799cad40959a16fc09dac36ef4c",
+    "src/car_protocol.c": "1c6c53209b143f1a246366cd8f96622a4aadcbe524edee85eff9852c8fb6e75c",
+    "src/car_uart.c": "78df8e530f2f432a35cbf96a569b00bb2ca0da4b0fed8f7b9c80b20ed9b03fb1",
+    "src/fire_led.c": "35edbd56177eff3d71f1a987889a4161a5fae14476457ec07157997691599996",
+    "src/main.c": "cf8646fc1fed2ecd7ff72f7c0836ae5524c9132764fd574a3cc2c012747649c2",
+    "src/motor.c": "088ec0ff15e801f15136b4b90fc0900cfaefe41537ebd40a092fd75488fab5a0",
+    "src/startup_stm32f103c8.S": "5d8e38b7a25976e2096c28ea4aa49780892ca09832e5184dfa30706d4b8b4b55",
+    "test/logic.ld": "4c264485d04401bbecea9fd64df9609b072bea5ea118993d678ddefba3517061",
+    "test/requirements.txt": "56bce36af734e3b9aeff2be4301bbc2a2c2b58ea1ea1e6ee6e792db84f96fbd4",
+    "test/run_logic_tests.py": "ffc7ab01b3cb46a150e17221dec1c9aaa237252ef876a668c244756010508e6c",
+    "test/test_logic.c": "86070a97075fe7a18d58ef457def83b3657be20e7420b68fb640eeed02390651"
+  },
+  "pwm_percent": {
+    "forward_straight": 80,
+    "backward_straight": 70,
+    "turn_outer": 70,
+    "turn_inner": 56
+  },
+  "fire_leds": {
+    "order": [
+      "PB10",
+      "PB1",
+      "PA7",
+      "PA6",
+      "PA5",
+      "PA4",
+      "PA3",
+      "PA2",
+      "PA1",
+      "PA0"
+    ],
+    "active_low": true,
+    "buzzer_pin": "PB0 active high",
+    "pwm": "TIM2 20kHz interrupt, 625Hz/32-step software PWM",
+    "duration_ms": 6400
+  },
+  "build": {
+    "environment": "stm32_motion",
+    "flash_bytes": 4148,
+    "ram_bytes": 1728
+  },
+  "verification": {
+    "release_build": "passed",
+    "arm_logic_tests": "passed",
+    "hardware_test": "passed; user flashed this firmware and verified the charge-shot light effect, PB0 double beep and vehicle motion on 2026-10-25",
+    "hardware_verified_by_user": true
+  },
+  "artifacts": {
+    "firmware.bin": {
+      "bytes": 4148,
+      "sha256": "dc3371f7916f13a0659e72ee3b53e7c513602ab1cbc82b043798057347f26ad3"
+    },
+    "firmware.hex": {
+      "bytes": 11727,
+      "sha256": "554fa22ccc1b65fbadc979505c06d6bae64e96685be0b83cf1c69e387c586aa3"
+    }
+  }
+}

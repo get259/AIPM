@@ -1,0 +1,2 @@
+# 当前 esptool 4.11 固件打包所需，安装到 PlatformIO Core 的 Python 环境。
+intelhex==2.3.0

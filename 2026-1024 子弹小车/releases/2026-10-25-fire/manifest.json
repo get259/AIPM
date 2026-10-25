@@ -1,0 +1,108 @@
+{
+  "release": "2026-10-25-fire",
+  "date": "2026-10-25",
+  "status": "software verified; fire light effect and phone microphone authorization unverified on hardware",
+  "sources": {
+    "linx-esp32": {
+      "base_commit": "7943a586e543e26a05f2e8e331d794dfab44250e",
+      "commit": "7943a586e543e26a05f2e8e331d794dfab44250e",
+      "status": "committed",
+      "file_count": 1451,
+      "snapshot_sha256": "6afd20509e3ed799c78494de6d0b9ba9b4ff894f95a5d0a7714fcb70f3c169ee"
+    },
+    "stm32_motion": {
+      "base_commit": "f1a0cf3093bf3ec6bad506e44f599368ad6300d4",
+      "commit": "f1a0cf3093bf3ec6bad506e44f599368ad6300d4",
+      "status": "committed",
+      "tracked_file_count": 42,
+      "snapshot_sha256": "01456b4d7ba2f0cac095fccd284e4aad5cdb3f1a7225b19fccc48ade9b3fe735"
+    }
+  },
+  "esp32s3": {
+    "application_version": "2.1.0",
+    "board": "bread-compact-wifi",
+    "flash_size": "16MB",
+    "psram": "OPI",
+    "uart": {
+      "port": 1,
+      "tx_gpio": 17,
+      "rx_gpio": 21,
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "microphone": {
+      "bclk_gpio": 5,
+      "ws_gpio": 4,
+      "sd_gpio": 6,
+      "channel": "left"
+    },
+    "listen_mode": "realtime",
+    "reply_audio": false,
+    "flash_files": {
+      "0x0": "esp32s3/bootloader.bin",
+      "0x8000": "esp32s3/partitions.bin",
+      "0xd000": "esp32s3/ota_data_initial.bin",
+      "0x20000": "esp32s3/firmware.bin",
+      "0x800000": "esp32s3/generated_assets.bin"
+    },
+    "flash_header_options": "keep existing image mode/frequency",
+    "firmware_bytes": 2701408,
+    "features": {
+      "web_fire_button": true,
+      "microphone_permission_requested_on_click": true,
+      "single_shot_fire_bit": 4
+    }
+  },
+  "stm32f103": {
+    "chip": "STM32F103C8",
+    "flash_address": "0x08000000",
+    "uart": {
+      "tx": "PA9",
+      "rx": "PA10",
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "firmware": "stm32f103/firmware.bin",
+    "hex": "stm32f103/firmware.hex",
+    "fire_leds": {
+      "order": [
+        "PB10",
+        "PB1",
+        "PA7",
+        "PA6",
+        "PA5",
+        "PA4",
+        "PA3",
+        "PA2",
+        "PA1",
+        "PA0"
+      ],
+      "active_low": true,
+      "buzzer_pin": "PB0 active high",
+      "pwm": "TIM2 20kHz interrupt, 625Hz/32-step software PWM",
+      "duration_ms": 6400
+    },
+    "build": {
+      "flash_bytes": 4148,
+      "ram_bytes": 1728
+    }
+  },
+  "verification": {
+    "esp32_firmware": "reused build produced from this source snapshot on 2026-10-25 01:38; page assets rebuilt in the same build",
+    "web_tests": "test/web/remote_ui.test.cjs and remote_audio.test.cjs passed",
+    "remote_flow_harness": "9 groups passed against real remote_application.cc",
+    "stm32_build": "release build passed",
+    "stm32_arm_logic_tests": "passed in ARM emulator",
+    "hardware_tests": "passed; user flashed the package and verified the flash light effect, PB0 buzzer, phone microphone authorization and real-vehicle motion on 2026-10-25",
+    "hardware_verified_by_user": true,
+    "flashed_by_assistant": false
+  },
+  "web_remote": {
+    "url": "https://192.168.4.1/",
+    "control_port": 8443,
+    "voice_mode": "realtime click toggle",
+    "cloud_audio_sender": "independent task",
+    "fire_request": "fire",
+    "root_ca_der_sha256": "d38daa23fdc16e21f504d35a2ab0a33233cf957956fcc185c5adc8c7831055ad"
+  }
+}

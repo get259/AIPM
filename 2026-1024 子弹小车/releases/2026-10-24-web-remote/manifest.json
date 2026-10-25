@@ -1,0 +1,77 @@
+{
+  "release": "2026-10-24-web-remote",
+  "date": "2026-10-24",
+  "status": "build verified; latest parallel-audio hardware stability unverified",
+  "sources": {
+    "linx-esp32": {
+      "base_commit": "15431c7673add4733ca1f1f03ae8a88993f73072",
+      "commit": "15431c7673add4733ca1f1f03ae8a88993f73072",
+      "status": "committed",
+      "file_count": 1451,
+      "snapshot_sha256": "aa5f20fb72f02e1d6bb1c5a67ec74d6f096cfa8a82e399a3b85ea8896893af16"
+    },
+    "stm32_motion": {
+      "base_commit": "6d132e0a9ea9fe1968fab3aa88f82c9b71aa4de6",
+      "snapshot_sha256": "ee4a786631dd29c420537baa07fb5d9c2152f50ecbf11444bf0c5d70031f32d4",
+      "tracked_file_count": 38,
+      "commit": "6d132e0a9ea9fe1968fab3aa88f82c9b71aa4de6"
+    }
+  },
+  "esp32s3": {
+    "application_version": "2.1.0",
+    "board": "bread-compact-wifi",
+    "flash_size": "16MB",
+    "psram": "OPI",
+    "uart": {
+      "port": 1,
+      "tx_gpio": 17,
+      "rx_gpio": 21,
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "microphone": {
+      "bclk_gpio": 5,
+      "ws_gpio": 4,
+      "sd_gpio": 6,
+      "channel": "left"
+    },
+    "listen_mode": "realtime",
+    "reply_audio": false,
+    "flash_files": {
+      "0x0": "esp32s3/bootloader.bin",
+      "0x8000": "esp32s3/partitions.bin",
+      "0xd000": "esp32s3/ota_data_initial.bin",
+      "0x20000": "esp32s3/firmware.bin",
+      "0x800000": "esp32s3/generated_assets.bin"
+    },
+    "flash_header_options": "keep existing image mode/frequency",
+    "application_bytes": 2699059
+  },
+  "stm32f103": {
+    "chip": "STM32F103C8",
+    "flash_address": "0x08000000",
+    "uart": {
+      "tx": "PA9",
+      "rx": "PA10",
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "firmware": "stm32f103/firmware.bin",
+    "hex": "stm32f103/firmware.hex"
+  },
+  "verification": {
+    "esp32_build": "passed",
+    "firmware_assets_and_certificates": "passed",
+    "previous_native_tests_passed": 31,
+    "parallel_audio_flow_groups_passed": 9,
+    "stm32": "unchanged binaries from 2026-10-24-realtime",
+    "flashed_by_assistant": false
+  },
+  "web_remote": {
+    "url": "https://192.168.4.1/",
+    "control_port": 8443,
+    "voice_mode": "realtime click toggle",
+    "cloud_audio_sender": "independent task",
+    "root_ca_der_sha256": "d38daa23fdc16e21f504d35a2ab0a33233cf957956fcc185c5adc8c7831055ad"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "release": "2026-10-24-realtime",
+  "date": "2026-10-24",
+  "status": "software-verified; hardware latency and continuous recognition unverified",
+  "sources": {
+    "linx-esp32": {
+      "base_commit": "4cbd058684372822908b93f56d39ad54806a070b",
+      "snapshot_sha256": "959029535ef0759010187866e1b43126dde4553bb86314709640d71054efb8a8",
+      "tracked_file_count": 1419,
+      "commit": "dbc01cb8e0218c5771037b0ad509f24a5bf4bb43"
+    },
+    "stm32_motion": {
+      "base_commit": "6d132e0a9ea9fe1968fab3aa88f82c9b71aa4de6",
+      "snapshot_sha256": "ee4a786631dd29c420537baa07fb5d9c2152f50ecbf11444bf0c5d70031f32d4",
+      "tracked_file_count": 38,
+      "commit": "6d132e0a9ea9fe1968fab3aa88f82c9b71aa4de6"
+    }
+  },
+  "esp32s3": {
+    "application_version": "2.1.0",
+    "board": "bread-compact-wifi",
+    "flash_size": "16MB",
+    "psram": "OPI",
+    "uart": {
+      "port": 1,
+      "tx_gpio": 17,
+      "rx_gpio": 21,
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "microphone": {
+      "bclk_gpio": 5,
+      "ws_gpio": 4,
+      "sd_gpio": 6,
+      "channel": "left"
+    },
+    "listen_mode": "realtime",
+    "reply_audio": false,
+    "flash_files": {
+      "0x0": "esp32s3/bootloader.bin",
+      "0x8000": "esp32s3/partitions.bin",
+      "0xd000": "esp32s3/ota_data_initial.bin",
+      "0x20000": "esp32s3/firmware.bin",
+      "0x800000": "esp32s3/generated_assets.bin"
+    },
+    "flash_header_options": "keep existing image mode/frequency"
+  },
+  "stm32f103": {
+    "chip": "STM32F103C8",
+    "flash_address": "0x08000000",
+    "uart": {
+      "tx": "PA9",
+      "rx": "PA10",
+      "baud": 115200,
+      "format": "8N1"
+    },
+    "firmware": "stm32f103/firmware.bin",
+    "hex": "stm32f103/firmware.hex"
+  },
+  "verification": {
+    "esp32_native_tests_passed": 24,
+    "esp32_build": "passed",
+    "stm32_build": "passed",
+    "stm32_arm_logic_tests": "passed",
+    "flashed_by_assistant": false
+  }
+}

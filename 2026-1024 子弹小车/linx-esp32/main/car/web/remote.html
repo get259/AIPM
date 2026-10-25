@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>小车遥控器</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f0f3f7;color:#172333;font:16px system-ui,-apple-system,"Microsoft YaHei",sans-serif}main{max-width:650px;margin:auto;padding:16px 16px 24px}header{display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:23px;margin:0}a{color:#2463a7}small{color:#596c7e}section{background:#fff;border:1px solid #dae1ea;border-radius:16px;padding:14px;margin-top:12px}button{font:inherit;border:0;border-radius:14px;padding:12px;min-height:50px;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}button:disabled{opacity:.42;cursor:default}button:focus-visible{outline:3px solid #1272e0;outline-offset:3px}.switch{display:flex;align-items:center;justify-content:space-between;gap:12px}.toggle{background:#dde5ef;color:#294057;min-width:126px}.toggle.on{background:#17694d;color:#fff}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-width:360px;margin:12px auto 8px}.direction{background:#e8eff8;color:#174575;font-weight:650;min-height:68px}.direction.pressed{background:#205fc1;color:#fff}.stop{background:#b3313d;color:white;font-weight:750}.up{grid-column:2}.left{grid-column:1}.down{grid-column:2}.voice{width:100%;background:#17694d;color:#fff;font-weight:650}.voice.active{background:#a32a3b}p{line-height:1.6;margin:10px 0}.hint{font-size:14px;color:#596c7e}.status{background:#e8eef5;padding:12px 16px;border-radius:12px;min-height:48px}.error{color:#9b2535}.dot{color:#26825d}#mic-state{min-height:24px}footer{margin-top:20px;display:flex;gap:20px;font-size:14px;flex-wrap:wrap}@media(max-width:380px){main{padding:16px 12px}.grid{gap:8px}.direction{min-height:62px;padding:12px}section{padding:12px}}
+</style>
+<script defer src="/remote.js"></script>
+</head>
+<body><main>
+<header><h1>小车遥控器</h1><small id="connection">正在连接…</small></header>
+<p class="hint">连接小车热点后使用。手机触控，电脑也可使用鼠标和键盘。</p>
+<div id="notice" class="status" role="status" aria-live="polite">正在读取设备状态…</div>
+<section>
+<div class="switch"><div><strong>网页独占遥控</strong><p id="source" class="hint">当前来源：等待设备确认</p></div><button id="toggle" class="toggle" type="button" aria-pressed="false" disabled>开启遥控</button></div>
+<div class="grid" aria-label="方向控制">
+<button class="direction up" data-state="1" type="button" disabled>↑<br>前进</button>
+<button class="direction left" data-state="8" type="button" disabled>←<br>左转</button>
+<button class="stop" id="stop" type="button" disabled>■<br>停止</button>
+<button class="direction" data-state="4" type="button" disabled>→<br>右转</button>
+<button class="direction down" data-state="2" type="button" disabled>↓<br>后退</button>
+</div>
+<p class="hint">按住方向按钮移动，松开停止。电脑：WASD / 方向键移动，空格停止。</p>
+<button id="fire" class="stop" type="button" disabled>发射一次 · 蓄力重炮</button>
+<p class="hint">单次蓄力后发射，结束全部熄灭；播放期间重复发射会被忽略。</p>
+</section>
+<section><button id="voice" class="voice" type="button" disabled>开始收听</button><p id="mic-state" class="hint">点击开始后持续收听，可连续说多句话；再次点击关闭收听。</p><p class="hint">首次使用需允许麦克风。若无法授权，请先安装并信任本地根证书，再用完整浏览器打开本页。</p></section>
+<footer><a href="/car-root-ca.cer" download="car-root-ca.cer">下载本地根证书</a><button id="reconnect" type="button">重新连接</button></footer>
+</main></body></html>
