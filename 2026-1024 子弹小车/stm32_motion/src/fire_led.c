@@ -1,6 +1,7 @@
 #include "stm32f10x.h"
 #include "car_fire.h"
 #include "fire_led.h"
+#include "fire_servo.h"
 
 static CarFire fire;
 static volatile uint32_t milliseconds;
@@ -30,6 +31,7 @@ void FireLed_Init(void)
     GPIO_Init(GPIOA, &gpio);
     gpio.GPIO_Pin = GPIO_Pin_10 | GPIO_Pin_1 | GPIO_Pin_0;
     GPIO_Init(GPIOB, &gpio);
+    FireServo_Init();
     /* TIM2 仅提供中断：20kHz / 32 级 = 625Hz 软件 PWM，不占 TIM4 电机通道。 */
     TIM_TimeBaseStructInit(&timer);
     timer.TIM_Prescaler = 71U;
@@ -58,6 +60,7 @@ void FireLed_Poll(void)
     if (rendered_ms == now) return;
     rendered_ms = now;
     CarFire_Update(&fire, now, next);
+    FireServo_SetPulse(CarFire_ServoPulseUs(&fire, now));
     const bool next_buzzer = CarFire_BuzzerHigh(&fire, now);
     uint32_t mask;
     __asm volatile ("mrs %0, primask" : "=r" (mask) :: "memory");

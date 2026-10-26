@@ -1,0 +1,56 @@
+{
+  "release": "2026-10-26-stm32-pb5-servo-r3",
+  "flash_address": "0x08000000",
+  "servo": {
+    "pin": "PB5",
+    "idle_compare_us": 0,
+    "run_pulse_us": 2000,
+    "start_ms": 3800,
+    "run_ms": 5000
+  },
+  "changes_from_r2": "Only reverse firing direction: 1000us -> 2000us. Idle remains no PWM.",
+  "verification": {
+    "native_logic_tests": "passed",
+    "firmware_build": "passed",
+    "hardware": "passed; user confirmed the final R3 firmware works on the board, including idle at power-on and firing direction",
+    "hardware_verified_by_user": true
+  },
+  "artifacts": {
+    "firmware.bin": {
+      "bytes": 4572,
+      "sha256": "e9e3c57c57a2776e52a093367b35d22202763f55ce17ae974ff9346c86e688c2"
+    },
+    "firmware.hex": {
+      "bytes": 12926,
+      "sha256": "676e5a2dcafd8cec27314a045da85ad6c2a0061258d40e5c474521d275c7c06e"
+    },
+    "firmware.elf": {
+      "bytes": 138924,
+      "sha256": "8e5f99d9da2f72e528462e9938f5e5fbb138ef7794737897527d98e881a547fe"
+    }
+  },
+  "source_sha256": {
+    "src/car_fire.c": "e27d50a6be2fe322a23088460a1415d4d3ab510b94e215f8f28b4f6ab885dbd5",
+    "src/fire_servo.c": "8ef8e2476e141a1b5dabf7a93ce9080da449a3ab60ec84e4dafc9bad5610f8a4",
+    "src/car_motion.c": "5b53d1cf0c2c6e97fa1a6f91e2ae7796232eb799cad40959a16fc09dac36ef4c",
+    "src/startup_stm32f103c8.S": "5d8e38b7a25976e2096c28ea4aa49780892ca09832e5184dfa30706d4b8b4b55",
+    "src/main.c": "cf8646fc1fed2ecd7ff72f7c0836ae5524c9132764fd574a3cc2c012747649c2",
+    "src/car_protocol.c": "1c6c53209b143f1a246366cd8f96622a4aadcbe524edee85eff9852c8fb6e75c",
+    "src/fire_led.c": "51f795db76b2293d98e3f14b09e3668f124673e0fed79e26c3eb5ccef20da763",
+    "src/car_uart.c": "78df8e530f2f432a35cbf96a569b00bb2ca0da4b0fed8f7b9c80b20ed9b03fb1",
+    "src/motor.c": "088ec0ff15e801f15136b4b90fc0900cfaefe41537ebd40a092fd75488fab5a0",
+    "include/car_protocol.h": "5c3c71a967e3b2974ac71c7e4696fdf6d0fbcd23abc27831ac7efaac53b9e8ce",
+    "include/car_config.h": "320938f07353d4f39e72e0e046eae90cf59b1d72ab95e39927343d6f586267e8",
+    "include/fire_led.h": "661f8dc7a5f5bce82f1a766752eeda772501765cebf93c4a30a7f80413475aa5",
+    "include/motor.h": "2dff5e375dc8e563d721980bdfe275ae9e5a3293ea4a42678b5377f36d20d354",
+    "include/car_uart.h": "248f361a66f4c081c13873ae431a7a7b5a13d289a6ee5dadec89fd8bb1b55b4a",
+    "include/car_fire.h": "2d825eea778c21f7c5fd266f769bc7f34c44d9d87c0b560ec56bc82aad13185f",
+    "include/fire_servo.h": "617dac4a36dd11634b432c12ded934ae7f64e3350a9a32b4f2cc8e16a18db04e",
+    "include/stm32f10x_conf.h": "573745ea7aeb4dc994cec9d8fded67a12f87bf3acb6089a12f7eb7063753771e",
+    "include/car_motion.h": "d3c6c26c4d9bd306c24f09565e71cb7715f0d7ca7856f1e29422828e7888522b"
+  },
+  "source_changes_from_r2": [
+    "include/car_fire.h"
+  ],
+  "esp32_changes": false
+}

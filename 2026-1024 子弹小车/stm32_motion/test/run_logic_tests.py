@@ -29,6 +29,7 @@ subprocess.run([
     str(root / "src" / "car_uart.c"),
     str(root / "src" / "car_fire.c"),
     str(root / "src" / "fire_led.c"),
+    str(root / "src" / "fire_servo.c"),
     str(root / "lib" / "STM32F1" / "src" / "stm32f10x_tim.c"),
     str(root / "test" / "test_logic.c"), "-o", str(elf),
 ], check=True)

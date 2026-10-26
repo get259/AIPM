@@ -1,13 +1,20 @@
 #include "car_motion.h"
 #include "car_protocol.h"
+#ifndef CAR_TEST_HOST
 #include "car_uart.h"
+#endif
 #include "car_config.h"
+#ifndef CAR_TEST_HOST
 #include "stm32f10x.h"
+#include "fire_servo.h"
+#endif
 #include "car_fire.h"
+#ifndef CAR_TEST_HOST
 #include "fire_led.h"
 
 void USART1_IRQHandler(void);
 void TIM2_IRQHandler(void);
+#endif
 
 #define CHECK(condition) do { if (!(condition)) return __LINE__; } while (0)
 
@@ -114,6 +121,7 @@ int Test_Run(void)
         CHECK(right.right > 0 && right.right < right.left);
     }
 
+#ifndef CAR_TEST_HOST
     /* 模拟 USART 寄存器输入，验证真实中断函数与队列读写代码。 */
     uint8_t byte = 0;
     bool lost = false;
@@ -150,10 +158,14 @@ int Test_Run(void)
     USART1_IRQHandler();
     CHECK(CarUart_Read(&byte, &lost));
     CHECK(!lost && byte == 0x55);
-    /* 执行真实灯效状态机：忙时不重启，单次结束清零，时钟回绕仍可正常结束。 */
+#endif
+    /* 上电保持熄灭，即使尚未触发就超过一次灯效时长也不能自动亮灯。 */
     CarFire fire = {0};
     uint8_t levels[CAR_FIRE_LED_COUNT];
     CarFire_Update(&fire, 100, levels);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
+    CarFire_Update(&fire, 10000, levels);
+    CHECK(!fire.active && !fire.hold_full);
     for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
     CHECK(CarFire_Trigger(&fire, 100));
     CHECK(!CarFire_Trigger(&fire, 200));
@@ -191,28 +203,110 @@ int Test_Run(void)
             CHECK(levels[i] == 0U || levels[i] == CAR_FIRE_PWM_STEPS);
     }
     CHECK(rising_edges == 2 && high_ms == 100);
+    /* 以下单独检查同一轮灯序，先重置独立状态。 */
+    fire = (CarFire){0};
     CHECK(CarFire_Trigger(&fire, 100));
-    /* 反向发射依次走过 PB10 到 PA0，每颗全亮 50ms。 */
+    /* 反向发射每隔 50ms 增加一颗满亮灯，已点亮的灯不能再熄灭。 */
     for (unsigned step = 0; step < 10; ++step) {
         CarFire_Update(&fire, 3900U + step * 50U, levels);
         for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i)
-            CHECK(levels[i] == (i == step ? 32U : 0U));
+            CHECK(levels[i] == (i <= step ? 32U : 0U));
+        /* 每步最后一毫秒仍保持相同灯数，直到下一步再点亮一颗。 */
+        CarFire_Update(&fire, 3949U + step * 50U, levels);
+        for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i)
+            CHECK(levels[i] == (i <= step ? 32U : 0U));
     }
     CarFire_Update(&fire, 4399U, levels);
     CHECK(levels[9] == 32);
-    for (unsigned i = 0; i < 9; ++i) CHECK(levels[i] == 0);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 32);
     CarFire_Update(&fire, 100U + CAR_FIRE_DURATION_MS, levels);
-    CHECK(!fire.active);
+    CHECK(!fire.active && fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 32);
+    /* 全亮保持 2 秒，最后一毫秒仍亮，到期立即全部熄灭且不再发声。 */
+    CarFire_Update(&fire, 100U + CAR_FIRE_RESET_MS - 1U, levels);
+    CHECK(!fire.active && fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 32);
+    CHECK(!CarFire_BuzzerHigh(&fire, 100U + CAR_FIRE_RESET_MS - 1U));
+    CarFire_Update(&fire, 100U + CAR_FIRE_RESET_MS, levels);
+    CHECK(!fire.active && !fire.hold_full);
     for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
     CarFire_Update(&fire, 10000, levels);
     for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
+    CHECK(!CarFire_BuzzerHigh(&fire, 10000));
+    /* 时间计数再次绕回起点附近时，保持全灭，不重新点亮或发声。 */
+    CarFire_Update(&fire, 101, levels);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
+    CHECK(!CarFire_BuzzerHigh(&fire, 3900));
+    /* 即使跳过整个发射及保持区间，下次更新也应直接恢复全灭。 */
+    CHECK(CarFire_Trigger(&fire, 20000));
+    CarFire_Update(&fire, 20000U + CAR_FIRE_RESET_MS + 1000U, levels);
+    CHECK(!fire.active && !fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
+    /* 灯已进入保持阶段，舵机仍在运行：重复请求不得重启或延长转动。 */
+    CHECK(CarFire_Trigger(&fire, 30000));
+    CarFire_Update(&fire, 30000U + CAR_FIRE_DURATION_MS, levels);
+    CHECK(fire.hold_full);
+    CHECK(!CarFire_Trigger(&fire, 35000));
+    CHECK(fire.started_ms == 30000);
+    CHECK(!CarFire_Trigger(&fire, 30000U + CAR_FIRE_SERVO_END_MS - 1U));
+    CHECK(CarFire_Trigger(&fire, 30000U + CAR_FIRE_SERVO_END_MS));
+    CHECK(fire.active && !fire.hold_full);
+    CarFire_Update(&fire, 30000U + CAR_FIRE_SERVO_END_MS + 1000U, levels);
+    CHECK(fire.active && !fire.hold_full);
+    CHECK(levels[0] > 0 && levels[0] < 32);
+    CarFire_Update(&fire, 30000U + CAR_FIRE_SERVO_END_MS + CAR_FIRE_RESET_MS, levels);
+    CHECK(!fire.active && !fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
     CHECK(CarFire_Trigger(&fire, 0xfffffff0U));
+    CHECK(!fire.hold_full);
+    CarFire_Update(&fire, 0xfffffff0U, levels);
+    CHECK(levels[0] == 2 && levels[9] == 32);
+    for (unsigned i = 1; i < 9; ++i) CHECK(levels[i] == 0);
     CHECK(CarFire_BuzzerHigh(&fire, 0xfffffff0U + CAR_FIRE_CHARGE_MS));
     CHECK(!CarFire_BuzzerHigh(&fire, 0xfffffff0U + CAR_FIRE_CHARGE_MS + 50U));
     CHECK(CarFire_BuzzerHigh(&fire, 0xfffffff0U + CAR_FIRE_CHARGE_MS + 100U));
     CarFire_Update(&fire, 0xfffffff0U + CAR_FIRE_DURATION_MS, levels);
-    CHECK(!fire.active);
-    CHECK(CarFire_Trigger(&fire, 7000));
+    CHECK(!fire.active && fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 32);
+    CarFire_Update(&fire, 0xfffffff0U + CAR_FIRE_RESET_MS - 1U, levels);
+    CHECK(fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 32);
+    CarFire_Update(&fire, 0xfffffff0U + CAR_FIRE_RESET_MS, levels);
+    CHECK(!fire.active && !fire.hold_full);
+    for (unsigned i = 0; i < CAR_FIRE_LED_COUNT; ++i) CHECK(levels[i] == 0);
+    CHECK(!CarFire_Trigger(&fire, 7000));
+    CHECK(CarFire_Trigger(&fire, 10000));
+    CHECK(!fire.hold_full);
+    /* 空闲无脉冲；按最新要求使用 2000us，延迟后恰好运行 5000ms。 */
+    CarFire servo = {0};
+    CHECK(CAR_FIRE_SERVO_STOP_US == 0U);
+    CHECK(CAR_FIRE_SERVO_RUN_US == 2000U);
+    CHECK(CarFire_ServoPulseUs(&servo, 0) == 0U);
+    CHECK(CarFire_ServoPulseUs(&servo, 100000U) == 0U);
+    CHECK(CarFire_ServoPulseUs(&servo, CAR_FIRE_SERVO_START_MS) == CAR_FIRE_SERVO_STOP_US);
+    CHECK(CarFire_Trigger(&servo, 10000));
+    unsigned servo_run_ms = 0;
+    for (unsigned t = 0; t <= CAR_FIRE_SERVO_END_MS + 100U; ++t) {
+        CarFire_Update(&servo, 10000U + t, levels);
+        const uint16_t pulse = CarFire_ServoPulseUs(&servo, 10000U + t);
+        const bool running = t >= CAR_FIRE_SERVO_START_MS && t < CAR_FIRE_SERVO_END_MS;
+        CHECK(pulse == (running ? CAR_FIRE_SERVO_RUN_US : CAR_FIRE_SERVO_STOP_US));
+        if (running) ++servo_run_ms;
+        if (t < CAR_FIRE_SERVO_END_MS && t % 1000U == 0U)
+            CHECK(!CarFire_Trigger(&servo, 10000U + t));
+    }
+    CHECK(servo_run_ms == 5000U && !servo.servo_pending);
+    /* 完成后的计数回绕不能使旧一轮舵机重新转起来。 */
+    CHECK(CarFire_ServoPulseUs(&servo, 10000U + CAR_FIRE_SERVO_START_MS) == CAR_FIRE_SERVO_STOP_US);
+    CHECK(CarFire_Trigger(&servo, 0xfffffff0U));
+    CHECK(CarFire_ServoPulseUs(&servo, 0xfffffff0U + CAR_FIRE_SERVO_START_MS - 1U) == CAR_FIRE_SERVO_STOP_US);
+    CHECK(CarFire_ServoPulseUs(&servo, 0xfffffff0U + CAR_FIRE_SERVO_START_MS) == CAR_FIRE_SERVO_RUN_US);
+    CHECK(CarFire_ServoPulseUs(&servo, 0xfffffff0U + CAR_FIRE_SERVO_END_MS - 1U) == CAR_FIRE_SERVO_RUN_US);
+    CHECK(CarFire_ServoPulseUs(&servo, 0xfffffff0U + CAR_FIRE_SERVO_END_MS) == CAR_FIRE_SERVO_STOP_US);
+    CHECK(!CarFire_Trigger(&servo, 0xfffffff0U + CAR_FIRE_SERVO_END_MS - 1U));
+    CHECK(CarFire_Trigger(&servo, 0xfffffff0U + CAR_FIRE_SERVO_END_MS));
+    CHECK(CarFire_ServoPulseUs(&servo, servo.started_ms) == CAR_FIRE_SERVO_STOP_US);
+#ifndef CAR_TEST_HOST
     /* 执行真实 PWM 中断，核对低有效、占空比和不会写到灯排之外的引脚。 */
     TIM2->DIER = TIM_IT_Update;
     TIM2->SR = TIM_IT_Update;
@@ -226,6 +320,7 @@ int Test_Run(void)
         TIM2_IRQHandler();
     }
     FireLed_Poll();
+    CHECK(TIM3->CCR2 == CAR_FIRE_SERVO_STOP_US);
     CarFire pwm_reference = {0};
     CHECK(CarFire_Trigger(&pwm_reference, 0));
     CarFire_Update(&pwm_reference, 100, levels);
@@ -259,5 +354,53 @@ int Test_Run(void)
         was_high = high;
     }
     CHECK(buzzer_edges == 2 && !was_high);
+    CHECK(TIM3->CCR2 == CAR_FIRE_SERVO_RUN_US);
+    /* 完成后真实 PWM 输出持续拉低全部灯脚，蜂鸣器保持低电平。 */
+    for (unsigned ms = 3952U; ms <= CAR_FIRE_DURATION_MS + 1U; ++ms) {
+        for (unsigned tick = 0; tick < 20; ++tick) {
+            TIM2->SR = TIM_IT_Update;
+            TIM2_IRQHandler();
+        }
+        FireLed_Poll();
+    }
+    for (unsigned tick = 0; tick < CAR_FIRE_PWM_STEPS; ++tick) {
+        TIM2->SR = TIM_IT_Update;
+        TIM2_IRQHandler();
+        CHECK(GPIOA->BSRR == 0x00ff0000U);
+        CHECK(GPIOB->BSRR == ((uint32_t)(GPIO_Pin_10 | GPIO_Pin_1 | GPIO_Pin_0) << 16));
+    }
+    /* 保持时间结束后，真实输出将全部低有效灯脚置高，蜂鸣器仍置低。 */
+    for (unsigned ms = 0; ms <= CAR_FIRE_HOLD_MS; ++ms) {
+        for (unsigned tick = 0; tick < 20; ++tick) {
+            TIM2->SR = TIM_IT_Update;
+            TIM2_IRQHandler();
+        }
+        FireLed_Poll();
+    }
+    TIM2->SR = TIM_IT_Update;
+    TIM2_IRQHandler();
+    CHECK(GPIOA->BSRR == 0x00ffU);
+    CHECK(GPIOB->BSRR == (GPIO_Pin_10 | GPIO_Pin_1 | ((uint32_t)GPIO_Pin_0 << 16)));
+    CHECK(TIM3->CCR2 == CAR_FIRE_SERVO_RUN_US); /* 灯全灭后，舵机仍要完成五秒。 */
+    for (unsigned ms = CAR_FIRE_RESET_MS + 3U; ms <= CAR_FIRE_SERVO_END_MS + 2U; ++ms) {
+        for (unsigned tick = 0; tick < 20; ++tick) {
+            TIM2->SR = TIM_IT_Update;
+            TIM2_IRQHandler();
+        }
+        FireLed_Poll();
+    }
+    CHECK(TIM3->CCR2 == CAR_FIRE_SERVO_STOP_US);
+#endif
     return 0;
 }
+
+#ifdef CAR_TEST_HOST
+#include <stdio.h>
+int main(void)
+{
+    const int result = Test_Run();
+    if (result) fprintf(stderr, "FAIL: test_logic.c:%d\n", result);
+    else puts("PASS: protocol/CRC/motion, original lights/buzzer, delayed 5000ms continuous-servo run, busy requests and clock wraparound");
+    return result ? 1 : 0;
+}
+#endif
