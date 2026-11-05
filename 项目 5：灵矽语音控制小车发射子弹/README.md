@@ -24,6 +24,7 @@ ESP32 固件包含本次网页改动，STM32 固件重新构建（Flash 4148、R
 
 分别在对应子目录使用 PlatformIO 构建；固件与下载地址见发布包说明。
 
+- [小车架构说明](子弹小车架构说明.md)
 - [小车控制与连续监听](linx-esp32/docs/car-integration.md)
 - [配网与激活码](linx-esp32/docs/wifi-activation.md)
 - [STM32 接线与运动协议](stm32_motion/README.md)
